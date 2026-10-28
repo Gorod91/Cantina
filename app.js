@@ -1,8 +1,6 @@
 'use strict';
 
 const APP_VERSION = '0.2.1';
-// Sostituito con il commit dal workflow di pubblicazione.
-const BUILD = '__BUILD__';
 
 // ---------- Impostazioni ----------
 
@@ -726,7 +724,7 @@ async function exportJson() {
 }
 
 function bindUi() {
-  $('#app-version').textContent = APP_VERSION + (BUILD.startsWith('__') ? '' : ` (${BUILD})`);
+  $('#app-version').textContent = APP_VERSION + (BUILD === 'dev' ? '' : ` (${BUILD})`);
   for (const sel of ['#in-camera', '#in-files']) {
     $(sel).addEventListener('change', (e) => {
       const files = [...e.target.files];
@@ -786,33 +784,33 @@ function bindUi() {
 
 // ---------- Aggiornamento automatico ----------
 
-// Su iOS l'app aperta dall'icona spesso viene solo ripresa, senza ricaricare la pagina:
-// a ogni avvio e ritorno in primo piano si confronta la build con version.json e, se è cambiata, si ricarica.
-let updating = false;
+// A ogni pubblicazione GitHub scrive la versione nel meta "app-version" e in version.json: se non coincidono l'app si ricarica.
+// Come nell'app Palestrina: il controllo parte all'avvio e ogni volta che l'app torna in primo piano,
+// perché su iOS l'app aperta dall'icona spesso viene solo ripresa, senza ricaricare la pagina.
+const BUILD = (document.querySelector('meta[name="app-version"]') || {}).content || 'dev';
+
+/** Mai ricaricare durante un riconoscimento o con una scheda aperta. */
+function busyNow() {
+  return running.size > 0 || $('#dlg-wine').open || $('#dlg-settings').open;
+}
 
 async function checkForUpdate() {
-  if (BUILD.startsWith('__') || updating || !navigator.onLine) return;
+  if (BUILD === 'dev') return;
   try {
-    const res = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
-    if (!res.ok) return;
-    const { build } = await res.json();
-    if (build === BUILD) sessionStorage.removeItem('cantina.updateTries');
-    if (!build || build === BUILD) return;
-    // Non interrompere un riconoscimento o una modifica in corso: si riprova tra poco.
-    if (running.size || $('#dlg-wine').open || $('#dlg-settings').open) {
+    const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+    const { v } = await res.json();
+    if (!v || v === BUILD) return;
+    if (busyNow()) {
       setTimeout(checkForUpdate, 5000);
       return;
     }
-    const tries = Number(sessionStorage.getItem('cantina.updateTries') || 0);
-    if (tries >= 3) return;
-    sessionStorage.setItem('cantina.updateTries', String(tries + 1));
-    updating = true;
-    toast('Nuova versione disponibile, aggiorno…');
-    // Il parametro nell'indirizzo evita che la cache di GitHub Pages restituisca la pagina vecchia.
-    location.replace(location.pathname + '?v=' + encodeURIComponent(build));
-  } catch {
-    // Offline o rete instabile: si userà la versione già installata.
-  }
+    // Se dopo la ricarica la pagina è ancora vecchia (CDN non ancora aggiornata) non si riprova subito.
+    const last = JSON.parse(localStorage.getItem('cantina.reloadFor') || 'null');
+    if (last && last.v === v && Date.now() - last.at < 120000) return;
+    localStorage.setItem('cantina.reloadFor', JSON.stringify({ v, at: Date.now() }));
+    toast('Aggiornamento…');
+    setTimeout(() => location.reload(), 400);
+  } catch { /* offline: si riprova alla prossima apertura */ }
 }
 
 function registerServiceWorker() {
@@ -831,7 +829,6 @@ function registerServiceWorker() {
 // ---------- Avvio ----------
 
 bindUi();
-if (location.search.includes('v=')) history.replaceState(null, '', location.pathname);
 checkForUpdate();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') checkForUpdate();

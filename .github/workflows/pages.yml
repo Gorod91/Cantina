@@ -22,11 +22,12 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Imposta la build
+      - name: Versione (per l'aggiornamento automatico dell'app)
         run: |
-          BUILD="${GITHUB_SHA::7}"
-          sed -i "s/__BUILD__/$BUILD/g" app.js index.html
-          echo "{\"build\": \"$BUILD\"}" > version.json
+          V="${GITHUB_SHA::7}"
+          sed -i "s/<meta name=\"app-version\" content=\"dev\">/<meta name=\"app-version\" content=\"$V\">/" index.html
+          grep -q "content=\"$V\"" index.html
+          printf '{"v":"%s"}\n' "$V" > version.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
