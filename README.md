@@ -24,6 +24,10 @@ Chiavi e token restano solo nel dispositivo, mai nel repository.
 
 L'app usa solo il permesso `drive.file`: vede esclusivamente i file che crea lei.
 
+3. **Ricerca dei dettagli (facoltativa)**: la ricerca Google di Gemini non è sempre inclusa nel piano gratuito.
+   In alternativa crea una chiave gratuita su <https://tavily.com> (1.000 ricerche al mese, senza carta) e incollala in Impostazioni:
+   Tavily trova le pagine del vino e Gemini, senza la sua ricerca, compila la scheda.
+
 ## Pubblicazione
 
 Il workflow `.github/workflows/pages.yml` pubblica il sito a ogni push.

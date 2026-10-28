@@ -83,8 +83,16 @@
       <label>Modello Gemini
         <input name="geminiModel" placeholder="gemini-flash-latest">
       </label>
-      <label>Verifica i dati con ricerca Google
-        <select name="webCheck"><option value="si">Sì (più preciso, qualche secondo in più)</option><option value="no">No</option></select>
+      <label>Ricerca dei dettagli sul web
+        <select name="search">
+          <option value="auto">Automatica (Tavily se c'è la chiave, altrimenti Google)</option>
+          <option value="google">Google tramite Gemini</option>
+          <option value="tavily">Tavily</option>
+          <option value="none">Nessuna (solo conoscenze di Gemini)</option>
+        </select>
+      </label>
+      <label>Chiave API Tavily (facoltativa, gratuita su tavily.com)
+        <input name="tavilyKey" type="password" autocomplete="off" placeholder="tvly-…">
       </label>
       <label>Google OAuth Client ID (per Drive)
         <input name="googleClientId" autocomplete="off" placeholder="…apps.googleusercontent.com">

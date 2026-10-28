@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.4';
+const APP_VERSION = '0.3.0';
 
 // ---------- Impostazioni ----------
 
@@ -9,12 +9,17 @@ const DEFAULT_SETTINGS = {
   geminiModel: 'gemini-flash-latest',
   googleClientId: '',
   driveFolder: 'Cantina',
-  webCheck: 'si',
+  search: 'auto',
+  tavilyKey: '',
 };
 
 function loadSettings() {
   try {
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem('cantina.settings') || '{}') };
+    const saved = JSON.parse(localStorage.getItem('cantina.settings') || '{}');
+    // Fino alla 0.2.x c'era solo "webCheck" (sì/no).
+    if (saved.webCheck === 'no' && !saved.search) saved.search = 'none';
+    delete saved.webCheck;
+    return { ...DEFAULT_SETTINGS, ...saved };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -435,25 +440,70 @@ function parseJsonText(text) {
 
 // Secondo passaggio: con i dati univoci del vino cerca su Google e compila il resto.
 // La ricerca non si può combinare con lo schema JSON su tutti i modelli, quindi il JSON è chiesto nel testo.
-async function geminiDetails(data, onWait, allowWeb = true) {
-  const web = allowWeb && settings.webCheck !== 'no';
+// Ricerca con Tavily (piano gratuito, senza carta): restituisce già il testo delle pagine trovate,
+// che Gemini legge senza usare la sua ricerca Google (non inclusa in tutti i piani gratuiti).
+async function tavilySearch(query) {
+  let res;
+  try {
+    res = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + settings.tavilyKey },
+      body: JSON.stringify({ query, search_depth: 'basic', max_results: 6, include_answer: false }),
+    });
+  } catch {
+    throw new Error('Tavily non raggiungibile');
+  }
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error('Tavily ' + res.status + ': ' + (json.detail?.error || json.detail || json.error || 'errore'));
+  return (json.results || []).map((r) => ({ title: r.title || r.url, uri: r.url, content: (r.content || '').slice(0, 1500) }));
+}
+
+// Ordine in cui provare le ricerche: se una non è disponibile si passa alla successiva, fino ai soli dati di Gemini.
+function searchPlan() {
+  const tavily = settings.tavilyKey ? 'tavily' : null;
+  const plans = {
+    auto: [tavily || 'google', 'none'],
+    google: ['google', tavily, 'none'],
+    tavily: [tavily, 'none'],
+    none: ['none'],
+  };
+  return (plans[settings.search] || plans.auto).filter(Boolean);
+}
+
+const SEARCH_NAME = { google: 'Google', tavily: 'Tavily' };
+
+async function geminiDetails(data, onWait, mode) {
   const who = QUICK.map((f) => data[f.k]).filter(Boolean).join(', ');
   const keys = DETAILS.map((f) => `"${f.k}"`).join(', ');
-  const prompt = `${web ? 'Cerca su Google la scheda tecnica di questo vino' : 'Compila la scheda di questo vino'}: ${who}.
-${web ? "Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.\n" : ''}Rispondi SOLO con un oggetto JSON con le chiavi ${keys}, "vino_trovato" (true/false) e "confermati" (elenco delle chiavi verificate su una fonte).
+  let intro = `Compila la scheda di questo vino: ${who}.`;
+  let sources = [];
+  if (mode === 'google') {
+    intro = `Cerca su Google la scheda tecnica di questo vino: ${who}.
+Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.`;
+  } else if (mode === 'tavily') {
+    sources = await tavilySearch(`${who} scheda tecnica vino`);
+    intro = `Compila la scheda di questo vino: ${who}.
+Usa i risultati di ricerca qui sotto, preferendo il sito del produttore. Se riguardano un altro vino o un'altra annata, tienine conto.
+${sources.map((r, n) => `[${n + 1}] ${r.title} (${r.uri})\n${r.content}`).join('\n\n') || '(nessun risultato)'}`;
+  }
+  const prompt = `${intro}
+Rispondi SOLO con un oggetto JSON con le chiavi ${keys}, "vino_trovato" (true/false) e "confermati" (elenco delle chiavi verificate su una fonte${mode === 'none' ? '; senza fonti è vuoto' : ''}).
 "vitigni" e "caratteristiche" sono elenchi di stringhe; "gradazione" è un numero; "formato_ml" è un intero. Un dato che non conosci con sicurezza vale null.
 Caratteristiche: solo se certe, per esempio biologico, biodinamico, naturale, senza solfiti aggiunti, non filtrato, dosaggio (brut nature, extra brut, brut…), residuo zuccherino (secco, amabile, dolce).
 "finestra_consumo" indica quando berlo per l'annata indicata; "descrizione" al massimo due frasi. Rispondi in italiano.`;
   const { text, grounding } = await geminiCall({
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    ...(web && { tools: [{ google_search: {} }] }),
+    ...(mode === 'google' && { tools: [{ google_search: {} }] }),
     generationConfig: { temperature: 0.1 },
   }, onWait);
   const result = parseJsonText(text);
-  const sources = (grounding?.groundingChunks || [])
-    .map((c) => c.web).filter(Boolean)
-    .map((w) => ({ title: w.title || w.uri, uri: w.uri }));
-  return { result, sources, web };
+  if (mode === 'google') {
+    sources = (grounding?.groundingChunks || [])
+      .map((c) => c.web).filter(Boolean)
+      .map((w) => ({ title: w.title || w.uri, uri: w.uri }));
+  }
+  if (mode === 'none') result.confermati = [];
+  return { result, sources: sources.map(({ title, uri }) => ({ title, uri })), mode };
 }
 
 // Cosa sta facendo l'app per ogni vino, mostrato nella lista.
@@ -461,6 +511,7 @@ const phases = new Map();
 const PHASE_TEXT = {
   quick: 'Lettura etichetta…',
   details: 'Ricerca dettagli su Google…',
+  detailsTavily: 'Ricerca dettagli sul web…',
   detailsOffline: 'Compilazione dettagli…',
 };
 
@@ -498,20 +549,22 @@ async function recognize(id) {
       renamePhotos(id);
       if (current.status === 'ok') return;
     }
-    enter(settings.webCheck !== 'no' ? 'details' : 'detailsOffline');
     try {
       let out;
-      let skipped = null;
-      try {
-        out = await geminiDetails(current.data, onWait);
-      } catch (e) {
-        // Ricerca Google esaurita o non disponibile nel piano gratuito: dettagli senza ricerca, segnati come incerti.
-        if (settings.webCheck === 'no' || ![400, 403, 429].includes(e.status)) throw e;
-        skipped = e.status === 429 ? 'limite del piano gratuito raggiunto' : 'non disponibile per questo modello';
-        enter('detailsOffline');
-        out = await geminiDetails(current.data, onWait, false);
+      const skipped = [];
+      for (const mode of searchPlan()) {
+        enter(mode === 'none' ? 'detailsOffline' : mode === 'tavily' ? 'detailsTavily' : 'details');
+        try {
+          out = await geminiDetails(current.data, onWait, mode);
+          break;
+        } catch (e) {
+          // Ricerca esaurita o non disponibile: si prova la successiva; i dati senza fonte restano in giallo.
+          if (mode === 'none' || (mode === 'google' && ![400, 403, 429].includes(e.status))) throw e;
+          skipped.push(`${SEARCH_NAME[mode]}: ${e.status === 429 ? 'limite del piano gratuito raggiunto' : e.message}`);
+        }
       }
-      const { result, sources, web } = out;
+      const { result, sources, mode } = out;
+      const web = mode !== 'none';
       const confirmed = new Set(result.vino_trovato === false ? [] : result.confermati || []);
       await updateWine(id, (w) => {
         const data = { ...w.data };
@@ -527,8 +580,9 @@ async function recognize(id) {
           status: 'ok',
           data: { ...data, ...pickUserEdits(w) },
           uncertain: [...uncertain],
-          web: web ? { found: result.vino_trovato !== false, confirmed: [...confirmed], sources, at: Date.now() }
-            : skipped ? { skipped, at: Date.now() } : null,
+          web: web || skipped.length
+            ? { provider: web ? SEARCH_NAME[mode] : null, found: result.vino_trovato !== false, confirmed: [...confirmed], sources, skipped, at: Date.now() }
+            : null,
         };
       });
     } catch (e) {
@@ -699,9 +753,14 @@ async function openWine(id) {
   if (w.error) state.push('Errore: ' + w.error);
   if (w.uncertain?.length) state.push('Campi incerti evidenziati in giallo.');
   if (w.web?.error) state.push('Verifica su Google non riuscita: ' + w.web.error);
-  else if (w.web?.skipped) state.push(`Ricerca Google ${w.web.skipped}: dettagli compilati da Gemini senza verifica (in giallo).`);
-  else if (w.web && !w.web.found) state.push('Vino non trovato con la ricerca Google.');
-  else if (w.web) state.push(`Verificati su Google: ${w.web.confirmed.join(', ') || 'nessun campo'}.`);
+  else if (w.web) {
+    const skipped = Array.isArray(w.web.skipped) ? w.web.skipped : w.web.skipped ? [`Google: ${w.web.skipped}`] : [];
+    if (skipped.length) state.push(`Ricerca non riuscita (${skipped.join('; ')}).`);
+    const where = w.web.provider || (w.web.confirmed && !skipped.length ? 'Google' : null);
+    if (!where) state.push('Dettagli compilati da Gemini senza verifica (in giallo).');
+    else if (!w.web.found) state.push(`Vino non trovato con la ricerca ${where}.`);
+    else state.push(`Verificati con ${where}: ${w.web.confirmed.join(', ') || 'nessun campo'}.`);
+  }
   w.photos.forEach((p, i) => p.error && state.push(`Foto ${i + 1}: ${p.error}`));
   $('#wine-state').innerHTML = esc(state.join(' ')) + (w.web?.sources?.length
     ? `<details><summary>Fonti (${w.web.sources.length})</summary><ul>${w.web.sources
