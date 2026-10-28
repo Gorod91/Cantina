@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.4.1';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.4.1', notes: ['Nuova grafica come nei prototipi: titolo grande senza fascia rossa, ricerca con lente, schede e fogli che salgono dal basso. Il riquadro di Drive compare solo se non hai fatto l\'accesso.'] },
   { v: '0.4.0', notes: [
     'Nuova barra in basso: Cantina, fotocamera al centro, Diario. "Importa foto" è sopra la lista.',
     'La lista mostra prezzo e bottiglie di ogni vino. Di base è in ordine di aggiunta, dal più recente; tocca "Ordine" per cambiarlo (nome, annata, prezzo, da bere prima, colore).',
@@ -271,8 +272,9 @@ function logout() {
 
 function updateDriveStatus() {
   const ok = !!driveToken();
-  $('#drive-status').textContent = ok ? 'Drive: collegato' : 'Drive: non collegato';
-  $('#btn-login').hidden = ok;
+  // Il riquadro compare solo quando serve accedere.
+  $('#drive-status').textContent = 'Drive non collegato';
+  $('#status-bar').hidden = ok;
 }
 
 async function driveFetch(url, opts = {}) {

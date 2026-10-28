@@ -18,7 +18,7 @@
 <body>
   <header>
     <h1 id="view-title">La mia cantina</h1>
-    <button id="btn-settings" class="ghost" aria-label="Impostazioni">⚙︎</button>
+    <button id="btn-settings" class="icon-btn" aria-label="Impostazioni"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
   </header>
 
   <main>
@@ -36,7 +36,10 @@
     </section>
 
     <section id="view-cellar">
-      <input id="search" type="search" placeholder="Cerca vino, produttore, posizione…">
+      <div class="searchbar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+        <input id="search" type="search" placeholder="Cerca vino, produttore, posizione…">
+      </div>
       <p class="hint" id="usage"></p>
       <div class="sortbar">
         <label class="sort">Ordine:
@@ -82,7 +85,7 @@
   </nav>
   <input id="in-files" type="file" accept="image/*" multiple hidden>
 
-  <dialog id="dlg-same">
+  <dialog id="dlg-same" class="sheet">
     <form method="dialog">
       <h2>Foto di uno stesso vino?</h2>
       <p class="hint">Se sono fronte e retro della stessa bottiglia diventano un solo vino.</p>
@@ -93,7 +96,7 @@
     </form>
   </dialog>
 
-  <dialog id="dlg-drink">
+  <dialog id="dlg-drink" class="sheet">
     <form method="dialog" id="drink-form">
       <div class="lead">
         <span class="thumb" id="drink-thumb"></span>
@@ -128,7 +131,7 @@
     </form>
   </dialog>
 
-  <dialog id="dlg-wine">
+  <dialog id="dlg-wine" class="sheet">
     <form method="dialog" id="wine-form">
       <div class="photos" id="wine-photos"></div>
       <div id="wine-state" class="hint"></div>
@@ -146,7 +149,7 @@
     </form>
   </dialog>
 
-  <dialog id="dlg-settings">
+  <dialog id="dlg-settings" class="sheet">
     <form method="dialog" id="settings-form">
       <h2>Impostazioni</h2>
       <label>Chiave API Gemini
