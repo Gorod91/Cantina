@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.7.1';
+const APP_VERSION = '0.7.2';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.7.2', notes: ['Scheda del vino: se ha più foto (fronte e retro) si vedono tutte in alto, affiancate.'] },
   { v: '0.7.1', notes: ['Raggruppa le foto: niente più proposta automatica di Gemini, le foto dello stesso vino si mettono insieme a mano con un tocco.'] },
   { v: '0.7.0', notes: [
     'Più foto insieme: Gemini propone quali sono della stessa bottiglia (fronte e retro, due scatti) e tu confermi nella schermata Raggruppa, dove puoi spostare o separare le foto con un tocco.',
@@ -1209,6 +1210,14 @@ function toast(msg, onClick) {
   setTimeout(() => el.remove(), onClick ? 8000 : 4000);
 }
 
+// Con più foto (fronte e retro) si vedono affiancate, senza dover scorrere.
+function renderHero(photos) {
+  const hero = $('#wine-photos');
+  hero.classList.toggle('two', photos.length === 2);
+  hero.classList.toggle('many', photos.length > 2);
+  hero.innerHTML = photos.map((p) => imgTag(p, heroBlob, 'dialog')).join('');
+}
+
 function showReleaseNotes() {
   $('#notes-list').innerHTML = RELEASE_NOTES.map((r) => `
     <h3>v${esc(r.v)}${r.v === APP_VERSION ? ' (questa)' : ''}</h3>
@@ -1861,7 +1870,7 @@ async function openWine(id) {
   const w = await getWine(id);
   if (!w) return;
   editingId = id;
-  $('#wine-photos').innerHTML = w.photos.map((p, i) => imgTag(p, i === 0 ? heroBlob : photoBlob, 'dialog')).join('');
+  renderHero(w.photos);
   $('#btn-crop').hidden = !settings.geminiKey || !w.photos.some((p) => !p.lost);
   const state = [];
   if (w.error) state.push('Errore: ' + w.error);
@@ -2170,7 +2179,7 @@ function bindUi() {
       if (editingId === id) {
         const cur = await getWine(id);
         releaseUrls('dialog');
-        $('#wine-photos').innerHTML = cur.photos.map((p, i) => imgTag(p, i === 0 ? heroBlob : photoBlob, 'dialog')).join('');
+        renderHero(cur.photos);
       }
     } catch (err) {
       toast('Ritaglio non riuscito: ' + err.message);

@@ -455,3 +455,8 @@ dialog.sheet.with-bar::before { display: none; }
 .gcount { font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
 .check.twin { flex-direction: column; align-items: stretch; background: var(--wine-soft); color: var(--fg); }
 .twin-acts { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Scheda vino con più foto: affiancate */
+.hero.two img, .hero.two .lost { flex: 1 1 0; min-width: 0; height: 240px; }
+.hero.many img, .hero.many .lost { width: 40%; height: 220px; }
+.hero.two, .hero.many { justify-content: flex-start; }
