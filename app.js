@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.9.1';
+const APP_VERSION = '0.9.2';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.9.2', notes: ['PC: la scheda del vino a destra ora scorre da sola, senza far scorrere la lista.'] },
   { v: '0.9.1', notes: ['Cantine condivise (in prova): in Impostazioni → Cantine puoi condividere la tua cantina con un\'email Google e passare da una cantina all\'altra. Chi la riceve la aggiunge con "Aggiungi una cantina condivisa con te".'] },
   { v: '0.9.0', notes: ['Tappa 3, sincronizzazione: con Drive collegato, cantina, diario ed eliminazioni restano uguali su tutti i tuoi dispositivi. Si sincronizza a ogni modifica, quando riapri l\'app e ogni due minuti; se lo stesso vino è stato modificato in due posti vale la modifica più recente.', 'Le foto aggiunte su un altro dispositivo vengono scaricate da Drive, con miniatura e ritaglio.', 'Chiavi Gemini e Tavily e modelli scelti passano da soli agli altri tuoi dispositivi (file cantina-impostazioni.json su Drive).'] },
   { v: '0.8.0', notes: ['Versione per PC (finestra larga almeno 1000 px): barra laterale, lista a colonne ordinabile toccando le intestazioni, scheda del vino fissa a destra (cliccando un altro vino si salva e passa a quello), foto trascinabili sulla finestra, / per cercare, Esc per chiudere la scheda.'] },

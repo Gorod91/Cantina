@@ -550,6 +550,7 @@ body.dropping #drop-hint {
     position: fixed; inset: 0 0 0 auto; margin: 0; z-index: 7;
     width: var(--panel); max-width: none; max-height: none; height: 100dvh;
     border-radius: 0; border-left: 1px solid var(--line); box-shadow: -20px 0 40px -30px rgba(0, 0, 0, 0.8);
+    overflow-y: auto; overscroll-behavior: contain;
   }
   #dlg-wine:not(:modal) .sheet-bar .grab { visibility: hidden; }
 
