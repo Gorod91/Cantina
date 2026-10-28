@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.7.1';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.7.1', notes: ['Raggruppa le foto: niente più proposta automatica di Gemini, le foto dello stesso vino si mettono insieme a mano con un tocco.'] },
   { v: '0.7.0', notes: [
     'Più foto insieme: Gemini propone quali sono della stessa bottiglia (fronte e retro, due scatti) e tu confermi nella schermata Raggruppa, dove puoi spostare o separare le foto con un tocco.',
     'Doppioni: se due vini hanno stesso produttore, nome e annata, la lista lo segnala e la scheda propone di unirli (bottiglie sommate, foto, note e bevute insieme).',
@@ -1065,34 +1066,6 @@ async function addPhotoGroups(groups) {
 
 // ---------- Più foto insieme: raggruppamento ----------
 
-// Gemini guarda le miniature di tutte le foto in una sola chiamata e dice quali ritraggono la stessa bottiglia.
-async function geminiGroup(photos) {
-  const parts = [{ text: `Ecco ${photos.length} foto di bottiglie di vino, numerate da 1 a ${photos.length}.
-Raggruppa le foto che ritraggono la STESSA bottiglia (per esempio fronte e retroetichetta, oppure due scatti dello stesso vino).
-Usa produttore, nome, annata, forma e colore della bottiglia e della capsula. Nel dubbio tieni le foto separate.
-Ogni numero deve comparire esattamente una volta.` }];
-  for (const [i, p] of photos.entries()) {
-    parts.push({ text: `Foto ${i + 1}:` });
-    parts.push({ inline_data: { mime_type: 'image/jpeg', data: await blobToBase64(new Blob([p.thumbBytes], { type: 'image/jpeg' })) } });
-  }
-  const out = await geminiFast({
-    contents: [{ role: 'user', parts }],
-    generationConfig: { responseMimeType: 'application/json', temperature: 0, responseSchema: {
-      type: 'OBJECT', properties: { gruppi: { type: 'ARRAY', items: { type: 'ARRAY', items: { type: 'INTEGER' } } } }, required: ['gruppi'],
-    } },
-  }, { label: 'Raggruppamento foto', model: readModel() }, true);
-  // Si accettano solo numeri validi, ognuno una volta; quelli mancanti restano da soli.
-  const seen = new Set();
-  const groups = [];
-  for (const g of JSON.parse(out.text).gruppi || []) {
-    const ok = (g || []).map((n) => n - 1).filter((i) => Number.isInteger(i) && i >= 0 && i < photos.length && !seen.has(i));
-    ok.forEach((i) => seen.add(i));
-    if (ok.length) groups.push(ok);
-  }
-  photos.forEach((_, i) => seen.has(i) || groups.push([i]));
-  return groups;
-}
-
 const grouping = { batch: 0, photos: [], groups: [], selected: null };
 
 function renderGroups() {
@@ -1128,22 +1101,7 @@ async function startGrouping(files) {
   grouping.groups = grouping.photos.map((_, i) => [i]);
   renderGroups();
   $('#btn-group-ok').disabled = false;
-  if (!settings.geminiKey || grouping.photos.length < 2) {
-    $('#group-status').textContent = settings.geminiKey ? '' : 'Senza chiave Gemini le foto vanno raggruppate a mano.';
-    return;
-  }
-  $('#group-status').textContent = 'Gemini cerca le foto della stessa bottiglia…';
-  try {
-    const groups = await geminiGroup(grouping.photos);
-    if (batch !== grouping.batch || !$('#dlg-group').open) return;
-    // Se nel frattempo hai già spostato qualcosa, la proposta di Gemini non sovrascrive le tue scelte.
-    if (grouping.groups.length === grouping.photos.length && grouping.selected == null) grouping.groups = groups;
-    const joined = groups.filter((x) => x.length > 1).length;
-    $('#group-status').textContent = joined ? `Gemini ha trovato ${joined === 1 ? 'una bottiglia' : `${joined} bottiglie`} con più foto. Controlla e conferma.` : 'Gemini non ha trovato foto della stessa bottiglia. Controlla e conferma.';
-    renderGroups();
-  } catch (e) {
-    if (batch === grouping.batch) $('#group-status').textContent = `Raggruppamento automatico non riuscito (${e.message}): raggruppa a mano.`;
-  }
+  $('#group-status').textContent = 'Metti nella stessa riga le foto dello stesso vino, per esempio fronte e retro.';
 }
 
 function bindGrouping() {
@@ -2154,7 +2112,7 @@ function bindUi() {
   $('#btn-notes').addEventListener('click', showReleaseNotes);
   announceUpdate();
   // Il tasto fotocamera non forza la fotocamera: iOS propone Scatta foto, Libreria foto o Scegli file.
-  // Più foto scelte insieme: Gemini propone quali sono della stessa bottiglia e si conferma nella schermata Raggruppa.
+  // Più foto scelte insieme: si raggruppano a mano nella schermata Raggruppa.
   $('#btn-import').addEventListener('click', () => $('#in-files').click());
   for (const sel of ['#in-camera', '#in-files']) $(sel).addEventListener('change', (e) => {
     const files = [...e.target.files];
