@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.1.2';
+const APP_VERSION = '0.1.3';
 
 // ---------- Impostazioni ----------
 
@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS = {
   geminiModel: 'gemini-flash-latest',
   googleClientId: '',
   driveFolder: 'Cantina',
+  webCheck: 'si',
 };
 
 function loadSettings() {
@@ -356,24 +357,64 @@ function geminiSchema() {
   return { type: 'OBJECT', properties: props, required: ['e_un_vino', 'campi_incerti'] };
 }
 
-async function geminiRecognize(blobs) {
-  const parts = [{ text: PROMPT }];
-  for (const b of blobs) parts.push({ inline_data: { mime_type: 'image/jpeg', data: await blobToBase64(b) } });
+async function geminiCall(body) {
   const model = settings.geminiModel || DEFAULT_SETTINGS.geminiModel;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(settings.geminiKey)}`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts }],
-      generationConfig: { responseMimeType: 'application/json', responseSchema: geminiSchema(), temperature: 0.2 },
-    }),
+    body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error('Gemini ' + res.status + ': ' + (json.error?.message || 'errore'));
-  const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('');
+  const candidate = json.candidates?.[0];
+  const text = candidate?.content?.parts?.filter((p) => !p.thought).map((p) => p.text || '').join('');
   if (!text) throw new Error('Gemini non ha restituito dati');
+  return { text, grounding: candidate.groundingMetadata };
+}
+
+async function geminiRecognize(blobs) {
+  const parts = [{ text: PROMPT }];
+  for (const b of blobs) parts.push({ inline_data: { mime_type: 'image/jpeg', data: await blobToBase64(b) } });
+  const { text } = await geminiCall({
+    contents: [{ role: 'user', parts }],
+    generationConfig: { responseMimeType: 'application/json', responseSchema: geminiSchema(), temperature: 0.2 },
+  });
   return JSON.parse(text);
+}
+
+// Campi che di solito non sono sull'etichetta e che la ricerca Google può correggere.
+const WEB_FIELDS = ['vitigni', 'regione', 'colore', 'stile', 'caratteristiche', 'affinamento', 'gradazione',
+  'temperatura_servizio', 'finestra_consumo', 'abbinamenti', 'descrizione'];
+
+function parseJsonText(text) {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end < start) throw new Error('Risposta della ricerca non leggibile');
+  return JSON.parse(text.slice(start, end + 1));
+}
+
+// Seconda chiamata con ricerca Google: la ricerca non si può combinare con lo schema JSON
+// su tutti i modelli, quindi il JSON viene chiesto nel testo.
+async function geminiWebCheck(data) {
+  const who = [data.produttore, data.nome, data.denominazione, data.annata].filter(Boolean).join(', ');
+  const fields = WEB_FIELDS.map((k) => `"${k}"`).join(', ');
+  const prompt = `Cerca su Google la scheda tecnica di questo vino: ${who}.
+Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.
+Dati letti dall'etichetta (possono contenere errori di deduzione): ${JSON.stringify(data)}
+Rispondi SOLO con un oggetto JSON con le chiavi ${fields}, "vino_trovato" (true/false) e "confermati" (elenco delle chiavi che hai verificato su una fonte).
+"vitigni" e "caratteristiche" sono elenchi di stringhe; "gradazione" è un numero; una chiave non verificata vale null.
+Colore: uno tra ${OPTIONS.colore.join(', ')}. Stile: uno tra ${OPTIONS.stile.join(', ')}. Rispondi in italiano.`;
+  const { text, grounding } = await geminiCall({
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    tools: [{ google_search: {} }],
+    generationConfig: { temperature: 0.1 },
+  });
+  const result = parseJsonText(text);
+  const sources = (grounding?.groundingChunks || [])
+    .map((c) => c.web).filter(Boolean)
+    .map((w) => ({ title: w.title || w.uri, uri: w.uri }));
+  return { result, sources };
 }
 
 async function recognize(id) {
@@ -383,10 +424,26 @@ async function recognize(id) {
   try {
     const result = await geminiRecognize(wine.photos.filter((p) => !p.lost).map(photoBlob));
     const { campi_incerti, e_un_vino, ...data } = result;
+    let uncertain = campi_incerti || [];
+    let web = null;
+    if (settings.webCheck !== 'no' && e_un_vino !== false && (data.produttore || data.nome)) {
+      try {
+        const { result: found, sources } = await geminiWebCheck(data);
+        const confirmed = new Set(found.vino_trovato === false ? [] : found.confermati || []);
+        for (const k of WEB_FIELDS) {
+          if (confirmed.has(k) && found[k] != null && found[k] !== '') data[k] = found[k];
+        }
+        uncertain = uncertain.filter((k) => !confirmed.has(k));
+        web = { found: found.vino_trovato !== false, confirmed: [...confirmed], sources, at: Date.now() };
+      } catch (e) {
+        web = { error: e.message, at: Date.now() };
+      }
+    }
     await updateWine(id, {
       status: 'ok',
       data: { ...data, ...pickUserEdits(wine) },
-      uncertain: campi_incerti || [],
+      uncertain,
+      web,
       notWine: e_un_vino === false,
       error: null,
     });
@@ -552,8 +609,14 @@ async function openWine(id) {
   const state = [];
   if (w.error) state.push('Errore: ' + w.error);
   if (w.uncertain?.length) state.push('Campi incerti evidenziati in giallo.');
+  if (w.web?.error) state.push('Verifica su Google non riuscita: ' + w.web.error);
+  else if (w.web && !w.web.found) state.push('Vino non trovato con la ricerca Google.');
+  else if (w.web) state.push(`Verificati su Google: ${w.web.confirmed.join(', ') || 'nessun campo'}.`);
   w.photos.forEach((p, i) => p.error && state.push(`Foto ${i + 1}: ${p.error}`));
-  $('#wine-state').textContent = state.join(' ');
+  $('#wine-state').innerHTML = esc(state.join(' ')) + (w.web?.sources?.length
+    ? `<details><summary>Fonti (${w.web.sources.length})</summary><ul>${w.web.sources
+      .map((x) => `<li><a href="${esc(x.uri)}" target="_blank" rel="noopener">${esc(x.title)}</a></li>`).join('')}</ul></details>`
+    : '');
   const d = w.data || {};
   const uncertain = new Set(w.uncertain || []);
   const input = (k, l, v, type) => `

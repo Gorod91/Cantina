@@ -87,7 +87,7 @@ button.small { padding: 4px 10px; font-size: 0.9rem; }
 
 .hint { color: var(--muted); font-size: 0.9rem; margin: 4px 0; }
 
-input, textarea {
+input, textarea, select {
   width: 100%;
   font: inherit;
   padding: 8px;
