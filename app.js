@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.4.3';
+const APP_VERSION = '0.4.4';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.4.4', notes: ['Corretto: con un valore della cantina sopra i 100 € con i centesimi la lista restava vuota e le foto nuove non comparivano.'] },
   { v: '0.4.3', notes: ['Se il database del telefono non risponde o c\'è un errore, compare un riquadro con i dettagli da copiare.'] },
   { v: '0.4.2', notes: ['Corretto: dopo l\'aggiornamento alla 0.4 la lista poteva restare vuota e le foto non venivano salvate. I vini non erano persi.', 'Tema scuro sempre attivo.'] },
   { v: '0.4.1', notes: ['Nuova grafica come nei prototipi: titolo grande senza fascia rossa, ricerca con lente, schede e fogli che salgono dal basso. Il riquadro di Drive compare solo se non hai fatto l\'accesso.'] },
@@ -1032,7 +1033,13 @@ function wineTitle(w) {
   return [d.produttore, d.nome].filter(Boolean).join(' · ') || 'Vino senza nome';
 }
 
-const formatPrice = (eur) => Number(eur).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', minimumFractionDigits: Number.isInteger(Number(eur)) ? 0 : 2, maximumFractionDigits: eur >= 100 ? 0 : 2 });
+// Sopra i 100 € senza centesimi; sotto, centesimi solo se ci sono (24 €, 24,50 €).
+function formatPrice(eur) {
+  const n = Number(eur);
+  const max = n >= 100 ? 0 : 2;
+  const min = Number.isInteger(n) ? 0 : max;
+  return n.toLocaleString('it-IT', { style: 'currency', currency: 'EUR', minimumFractionDigits: min, maximumFractionDigits: max });
+}
 
 // Nella lista: il vino e l'annata in grassetto, sotto produttore e denominazione.
 function listTitle(w) {
