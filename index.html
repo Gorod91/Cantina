@@ -58,7 +58,7 @@
     </section>
   </main>
 
-  <footer>v<span id="app-version"></span></footer>
+  <footer><button type="button" id="btn-notes" class="link">v<span id="app-version"></span> · Note di rilascio</button></footer>
 
   <dialog id="dlg-wine">
     <form method="dialog" id="wine-form">
@@ -113,6 +113,14 @@
         <button value="cancel" formnovalidate>Annulla</button>
         <button value="save" class="primary">Salva</button>
       </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-notes">
+    <form method="dialog">
+      <h2>Note di rilascio</h2>
+      <div id="notes-list"></div>
+      <div class="actions"><button value="close" class="primary">Chiudi</button></div>
     </form>
   </dialog>
 

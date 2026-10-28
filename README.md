@@ -35,4 +35,4 @@ In *Settings → Pages* del repository imposta *Source: GitHub Actions*.
 
 Aggiornamento automatico: il service worker (`sw.js`) scarica sempre prima la versione online
 e usa la cache solo offline; quando cambia, la pagina si ricarica da sola.
-Ricordarsi di aumentare `APP_VERSION` in `app.js` a ogni rilascio.
+Ricordarsi di aumentare `APP_VERSION` in `app.js` a ogni rilascio e di aggiungere le novità in cima a `RELEASE_NOTES`.

@@ -1,6 +1,38 @@
 'use strict';
 
-const APP_VERSION = '0.3.6';
+const APP_VERSION = '0.3.7';
+
+// Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
+const RELEASE_NOTES = [
+  { v: '0.3.7', notes: ['Note di rilascio: tocca la versione in fondo alla pagina; dopo un aggiornamento un avviso ti porta qui.'] },
+  { v: '0.3.6', notes: [
+    'Ricerca dei dettagli più mirata: produttore tra virgolette e la parola "vino" (niente più risultati su criptovalute o aziende omonime).',
+    'Vini esteri: la prima fase legge la nazione e la ricerca usa vin, Wein, vinho o wine, preferendo i siti di quel paese.',
+    'Scartati i risultati che non nominano né il produttore né il vino.',
+  ] },
+  { v: '0.3.5', notes: [
+    'Prezzo stimato a bottiglia nella scheda e nella lista.',
+    'Valore stimato della cantina sotto il titolo "Vini".',
+    'Il costo stimato di Gemini è ora solo nel registro di debug.',
+  ] },
+  { v: '0.3.4', notes: ['Stima del costo di Gemini se si passasse a un piano a pagamento.'] },
+  { v: '0.3.3', notes: ['Velocità: Gemini Flash-Lite con ragionamento minimo per entrambe le fasi (prima fino a 5 minuti, ora pochi secondi).'] },
+  { v: '0.3.1', notes: ['Registro di debug nella scheda del vino, con output completo di ogni passaggio, errori e pulsante "Copia registro".'] },
+  { v: '0.3.0', notes: [
+    'Ricerca gratuita dei dettagli con Tavily (1.000 ricerche al mese), in alternativa a Google.',
+    'Pulsante "Cerca su Google" nella scheda del vino.',
+    'Gestione dei limiti del piano gratuito di Gemini: attesa e nuovo tentativo, poi ripiego senza ricerca.',
+  ] },
+  { v: '0.2.2', notes: ['Zoom della pagina bloccato; toccando una foto nella scheda si apre ingrandita e zoomabile.'] },
+  { v: '0.2.1', notes: ["Aggiornamento automatico all'apertura, come nell'app Palestrina."] },
+  { v: '0.2.0', notes: ['Riconoscimento in due fasi: lettura rapida di produttore, nome, tipo e annata, poi ricerca dei dettagli sul web.'] },
+  { v: '0.1.3', notes: [
+    'Colore (anche orange), stile e caratteristiche al posto della tipologia.',
+    'Verifica dei dati con la ricerca Google di Gemini.',
+    'Corrette le foto mostrate con il punto di domanda su iOS.',
+  ] },
+  { v: '0.1.0', notes: ['Primo prototipo: foto o import di più immagini, caricamento su Drive, riconoscimento con Gemini, archivio locale ed esportazione JSON.'] },
+];
 
 // ---------- Impostazioni ----------
 
@@ -847,12 +879,27 @@ const imgTag = (p, getBlob, group) => p.lost
   ? '<span class="lost">Foto non recuperabile</span>'
   : `<img src="${blobUrl(getBlob(p), group)}" alt="">`;
 
-function toast(msg) {
+function toast(msg, onClick) {
   const el = document.createElement('div');
   el.className = 'toast';
   el.textContent = msg;
+  if (onClick) el.addEventListener('click', () => { el.remove(); onClick(); });
   document.body.append(el);
-  setTimeout(() => el.remove(), 4000);
+  setTimeout(() => el.remove(), onClick ? 8000 : 4000);
+}
+
+function showReleaseNotes() {
+  $('#notes-list').innerHTML = RELEASE_NOTES.map((r) => `
+    <h3>v${esc(r.v)}${r.v === APP_VERSION ? ' (questa)' : ''}</h3>
+    <ul>${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`).join('');
+  $('#dlg-notes').showModal();
+}
+
+// Dopo un aggiornamento un avviso porta alle novità (una volta per versione).
+function announceUpdate() {
+  let seen = null;
+  try { seen = localStorage.getItem('cantina.seenVersion'); localStorage.setItem('cantina.seenVersion', APP_VERSION); } catch {}
+  if (seen && seen !== APP_VERSION) toast(`Aggiornata alla v${APP_VERSION} · tocca per le novità`, showReleaseNotes);
 }
 
 function wineTitle(w) {
@@ -1152,6 +1199,8 @@ function bindUi() {
   bindViewer();
   blockPageZoom();
   $('#app-version').textContent = APP_VERSION + (BUILD === 'dev' ? '' : ` (${BUILD})`);
+  $('#btn-notes').addEventListener('click', showReleaseNotes);
+  announceUpdate();
   for (const sel of ['#in-camera', '#in-files']) {
     $(sel).addEventListener('change', (e) => {
       const files = [...e.target.files];
