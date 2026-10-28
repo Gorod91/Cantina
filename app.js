@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.7.4';
+const APP_VERSION = '0.7.5';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.7.5', notes: ['Raggruppa le foto più comodo: foto grandi, lente per vederle intere, scegli le foto dello stesso vino e premi Unisci (o Separa per dividerle).'] },
   { v: '0.7.4', notes: ['Etichetta prima del web: vitigni, gradazione, formato, regione e caratteristiche stampati in etichetta o retroetichetta vengono letti dalla foto e il web non li sovrascrive, li completa solo se mancano.', 'Dopo "Unisci" il vino viene riletto con tutte le foto insieme.'] },
   { v: '0.7.3', notes: ['Eliminare più vini: "Seleziona" sopra la lista, tocca i vini e poi Elimina. Nella scheda del vino il pulsante Elimina è in vista, non più dentro Modifica.'] },
   { v: '0.7.2', notes: ['Scheda del vino: se ha più foto (fronte e retro) si vedono tutte in alto, affiancate.'] },
@@ -1080,29 +1081,39 @@ async function addPhotoGroups(groups) {
 
 // ---------- Più foto insieme: raggruppamento ----------
 
-const grouping = { batch: 0, photos: [], groups: [], selected: null };
+const grouping = { batch: 0, photos: [], groups: [], sel: new Set() };
 
 function renderGroups() {
   releaseUrls('group');
   const g = grouping;
   $('#group-list').innerHTML = g.groups.map((idx, gi) => `
-    <li data-group="${gi}" class="${g.selected != null && !idx.includes(g.selected) ? 'target' : ''}">
-      <span class="gnum">${gi + 1}</span>
-      <div class="gphotos">${idx.map((i) => `<button type="button" class="gphoto${g.selected === i ? ' sel' : ''}" data-photo="${i}"><img src="${blobUrl(new Blob([g.photos[i].thumbBytes], { type: 'image/jpeg' }), 'group')}" alt="Foto ${i + 1}"></button>`).join('')}</div>
-      <span class="gcount">${idx.length > 1 ? `${idx.length} foto, un vino` : '1 foto'}</span>
+    <li class="${idx.length > 1 ? 'multi' : ''}">
+      <div class="ghead"><b>Vino ${gi + 1}</b><span>${idx.length > 1 ? `${idx.length} foto` : '1 foto'}</span></div>
+      <div class="gphotos">${idx.map((i) => `
+        <div class="gphoto${g.sel.has(i) ? ' sel' : ''}" data-photo="${i}" role="button" aria-pressed="${g.sel.has(i)}">
+          <img src="${blobUrl(new Blob([g.photos[i].thumbBytes], { type: 'image/jpeg' }), 'group')}" alt="Foto ${i + 1}">
+          <span class="gtick" aria-hidden="true"></span>
+          <button type="button" class="gzoom" data-zoom="${i}" aria-label="Ingrandisci la foto">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4M11 8.5v5M8.5 11h5"/></svg>
+          </button>
+        </div>`).join('')}</div>
     </li>`).join('');
-  const sel = g.selected != null;
-  $('#group-hint').textContent = sel
-    ? 'Tocca un altro vino per spostarci la foto, oppure "Separa" per metterla da sola.'
-    : 'Le foto nella stessa riga diventano un solo vino. Tocca una foto per spostarla.';
-  $('#btn-group-split').hidden = !sel;
-  const n = g.groups.length;
-  $('#btn-group-ok').textContent = `Aggiungi ${n} ${n === 1 ? 'vino' : 'vini'}`;
+  const n = g.sel.size;
+  const canSplit = [...g.sel].some((i) => g.groups.find((idx) => idx.includes(i)).length > 1);
+  $('#group-hint').textContent = n
+    ? `${n} ${n === 1 ? 'foto scelta' : 'foto scelte'}.`
+    : 'Tocca le foto dello stesso vino e premi Unisci. La lente le ingrandisce.';
+  $('#btn-group-merge').disabled = n < 2;
+  $('#btn-group-merge').textContent = n >= 2 ? `Unisci ${n} foto` : 'Unisci';
+  $('#btn-group-split').disabled = !canSplit;
+  const w = g.groups.length;
+  $('#btn-group-ok').textContent = `Aggiungi ${w} ${w === 1 ? 'vino' : 'vini'}`;
 }
 
 async function startGrouping(files) {
   const batch = ++grouping.batch;
-  Object.assign(grouping, { photos: [], groups: [], selected: null });
+  Object.assign(grouping, { photos: [], groups: [] });
+  grouping.sel.clear();
   $('#group-status').textContent = 'Preparo le foto…';
   $('#group-list').innerHTML = '';
   $('#btn-group-ok').disabled = true;
@@ -1115,37 +1126,46 @@ async function startGrouping(files) {
   grouping.groups = grouping.photos.map((_, i) => [i]);
   renderGroups();
   $('#btn-group-ok').disabled = false;
-  $('#group-status').textContent = 'Metti nella stessa riga le foto dello stesso vino, per esempio fronte e retro.';
+  $('#group-status').textContent = 'Ogni riquadro è un vino. Se due foto sono dello stesso vino (per esempio fronte e retro), uniscile.';
 }
 
 function bindGrouping() {
   $('#group-list').addEventListener('click', (e) => {
     const g = grouping;
-    const photo = e.target.closest('[data-photo]');
-    const row = e.target.closest('[data-group]');
-    if (!row) return;
-    const gi = Number(row.dataset.group);
-    if (g.selected == null) {
-      if (photo) g.selected = Number(photo.dataset.photo);
-    } else if (photo && Number(photo.dataset.photo) === g.selected) {
-      g.selected = null;
-    } else if (!g.groups[gi].includes(g.selected)) {
-      // Sposta la foto scelta in questo vino.
-      g.groups = g.groups.map((idx) => idx.filter((i) => i !== g.selected));
-      g.groups[gi].push(g.selected);
-      g.groups = g.groups.filter((idx) => idx.length);
-      g.selected = null;
-    } else if (photo) {
-      g.selected = Number(photo.dataset.photo);
+    const zoom = e.target.closest('[data-zoom]');
+    if (zoom) {
+      // Si apre la foto intera, scorrendo tra tutte quelle scelte.
+      const order = g.groups.flat();
+      const urls = order.map((i) => blobUrl(photoBlob(g.photos[i]), 'group'));
+      openViewer(urls, order.indexOf(Number(zoom.dataset.zoom)));
+      return;
     }
+    const photo = e.target.closest('[data-photo]');
+    if (!photo) return;
+    const i = Number(photo.dataset.photo);
+    if (g.sel.has(i)) g.sel.delete(i); else g.sel.add(i);
+    renderGroups();
+  });
+  $('#btn-group-merge').addEventListener('click', () => {
+    const g = grouping;
+    if (g.sel.size < 2) return;
+    // Le foto scelte finiscono nel primo vino che ne contiene una, nell'ordine in cui sono.
+    const first = g.groups.findIndex((idx) => idx.some((i) => g.sel.has(i)));
+    const moved = g.groups.flat().filter((i) => g.sel.has(i));
+    g.groups = g.groups.map((idx, gi) => (gi === first ? moved.concat(idx.filter((i) => !g.sel.has(i))) : idx.filter((i) => !g.sel.has(i)))).filter((idx) => idx.length);
+    g.sel.clear();
     renderGroups();
   });
   $('#btn-group-split').addEventListener('click', () => {
     const g = grouping;
-    if (g.selected == null) return;
-    g.groups = g.groups.map((idx) => idx.filter((i) => i !== g.selected)).filter((idx) => idx.length);
-    g.groups.push([g.selected]);
-    g.selected = null;
+    const out = [];
+    g.groups = g.groups.map((idx) => {
+      if (idx.length < 2) return idx;
+      const keep = idx.filter((i) => !g.sel.has(i));
+      out.push(...idx.filter((i) => g.sel.has(i)).map((i) => [i]));
+      return keep;
+    }).filter((idx) => idx.length).concat(out);
+    g.sel.clear();
     renderGroups();
   });
   $('#dlg-group').addEventListener('close', () => {
@@ -1153,7 +1173,8 @@ function bindGrouping() {
     g.batch++;
     releaseUrls('group');
     if ($('#dlg-group').returnValue === 'ok') addPhotoGroups(g.groups.map((idx) => idx.map((i) => g.photos[i])));
-    Object.assign(g, { photos: [], groups: [], selected: null });
+    Object.assign(g, { photos: [], groups: [] });
+    g.sel.clear();
   });
 }
 

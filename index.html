@@ -131,10 +131,13 @@
       <h2>Raggruppa le foto</h2>
       <p class="hint" id="group-status"></p>
       <ul id="group-list"></ul>
-      <p class="hint" id="group-hint"></p>
+      <div class="gtools">
+        <p class="hint" id="group-hint"></p>
+        <button type="button" id="btn-group-merge" class="accent" disabled>Unisci</button>
+        <button type="button" id="btn-group-split" disabled>Separa</button>
+      </div>
       <div class="actions">
         <button value="ok" class="primary" id="btn-group-ok">Aggiungi</button>
-        <button type="button" id="btn-group-split" hidden>Separa</button>
         <button value="cancel" formnovalidate>Annulla</button>
       </div>
     </form>
