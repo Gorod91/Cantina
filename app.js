@@ -1,12 +1,14 @@
 'use strict';
 
-const APP_VERSION = '0.3.1';
+const APP_VERSION = '0.3.2';
 
 // ---------- Impostazioni ----------
 
 const DEFAULT_SETTINGS = {
   geminiKey: '',
-  geminiModel: 'gemini-flash-latest',
+  // Flash-Lite: sul piano gratuito Flash rispondeva anche dopo 2-5 minuti.
+  geminiModel: 'gemini-flash-lite-latest',
+  detailsModel: 'gemini-flash-lite-latest',
   googleClientId: '',
   driveFolder: 'Cantina',
   search: 'auto',
@@ -370,8 +372,12 @@ let geminiQueue = Promise.resolve();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // hooks: { wait(secondi), log(passo, testo), label } per il conto alla rovescia e il registro di debug.
+let geminiPending = 0;
+
 function geminiCall(body, hooks) {
-  const job = geminiQueue.then(() => geminiFetch(body, hooks));
+  if (geminiPending) hooks?.log?.(`${hooks.label || 'Gemini'} · in coda`, `${geminiPending} richieste prima di questa`);
+  geminiPending++;
+  const job = geminiQueue.then(() => geminiFetch(body, hooks)).finally(() => geminiPending--);
   geminiQueue = job.catch(() => {});
   return job;
 }
@@ -387,7 +393,7 @@ function describeRequest(body) {
 
 async function geminiFetch(body, hooks = {}) {
   const log = (step, text) => hooks.log?.(`${hooks.label || 'Gemini'} · ${step}`, text);
-  const model = settings.geminiModel || DEFAULT_SETTINGS.geminiModel;
+  const model = hooks.model || settings.geminiModel || DEFAULT_SETTINGS.geminiModel;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(settings.geminiKey)}`;
   for (let attempt = 0; ; attempt++) {
     log(`richiesta a ${model}${attempt ? ` (tentativo ${attempt + 1})` : ''}`, describeRequest(body));
@@ -430,27 +436,38 @@ async function geminiFetch(body, hooks = {}) {
   }
 }
 
-// Opzioni per rispondere prima (niente ragionamento, immagini a risoluzione media).
-// Non tutti i modelli le accettano: in quel caso si riprova senza.
-const FAST_CONFIG = { thinkingConfig: { thinkingBudget: 0 }, mediaResolution: 'MEDIA_RESOLUTION_MEDIUM' };
-let fastConfigOk = true;
+// Opzioni per rispondere prima: ragionamento al minimo (thinkingLevel per Gemini 3, thinkingBudget per 2.x)
+// e immagini a risoluzione media. Non tutti i modelli accettano tutte le opzioni: si prova in ordine
+// e si ricorda per ogni modello la prima accettata.
+const FAST_VARIANTS = [
+  { thinkingConfig: { thinkingLevel: 'minimal' } },
+  { thinkingConfig: { thinkingBudget: 0 } },
+  {},
+];
+const fastVariant = new Map();
+
+async function geminiFast(body, hooks, withImages) {
+  const model = hooks.model || settings.geminiModel || DEFAULT_SETTINGS.geminiModel;
+  for (let v = fastVariant.get(model) || 0; v < FAST_VARIANTS.length; v++) {
+    const extra = { ...FAST_VARIANTS[v], ...(withImages && v < FAST_VARIANTS.length - 1 && { mediaResolution: 'MEDIA_RESOLUTION_MEDIUM' }) };
+    try {
+      const out = await geminiCall({ ...body, generationConfig: { ...body.generationConfig, ...extra } }, hooks);
+      fastVariant.set(model, v);
+      return out;
+    } catch (e) {
+      if (e.status !== 400 || v === FAST_VARIANTS.length - 1) throw e;
+      hooks.log?.(`${hooks.label} · opzione non accettata`, `${JSON.stringify(extra)}: provo la successiva`);
+    }
+  }
+}
 
 async function geminiQuick(blobs, hooks) {
   const parts = [{ text: QUICK_PROMPT }];
   for (const b of blobs) parts.push({ inline_data: { mime_type: 'image/jpeg', data: await blobToBase64(b) } });
-  const config = { responseMimeType: 'application/json', responseSchema: quickSchema(), temperature: 0.1 };
-  const call = (extra) => geminiCall({ contents: [{ role: 'user', parts }], generationConfig: { ...config, ...extra } }, { ...hooks, label: 'Lettura etichetta' });
-  let out;
-  if (fastConfigOk) {
-    try {
-      out = await call(FAST_CONFIG);
-    } catch (e) {
-      if (e.status !== 400) throw e;
-      hooks?.log?.('Lettura etichetta · modalità veloce non accettata', 'Riprovo senza thinkingConfig/mediaResolution');
-      fastConfigOk = false;
-    }
-  }
-  out ??= await call({});
+  const out = await geminiFast({
+    contents: [{ role: 'user', parts }],
+    generationConfig: { responseMimeType: 'application/json', responseSchema: quickSchema(), temperature: 0.1 },
+  }, { ...hooks, label: 'Lettura etichetta', model: settings.geminiModel || DEFAULT_SETTINGS.geminiModel }, true);
   return JSON.parse(out.text);
 }
 
@@ -511,7 +528,8 @@ async function geminiDetails(data, hooks, mode) {
     intro = `Cerca su Google la scheda tecnica di questo vino: ${who}.
 Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.`;
   } else if (mode === 'tavily') {
-    sources = await tavilySearch(`${who} scheda tecnica vino`, hooks.log);
+    const query = ['produttore', 'nome', 'denominazione', 'annata'].map((k) => data[k]).filter(Boolean).join(' ');
+    sources = await tavilySearch(`${query} scheda tecnica`, hooks.log);
     intro = `Compila la scheda di questo vino: ${who}.
 Usa i risultati di ricerca qui sotto, preferendo il sito del produttore. Se riguardano un altro vino o un'altra annata, tienine conto.
 ${sources.map((r, n) => `[${n + 1}] ${r.title} (${r.uri})\n${r.content}`).join('\n\n') || '(nessun risultato)'}`;
@@ -521,11 +539,15 @@ Rispondi SOLO con un oggetto JSON con le chiavi ${keys}, "vino_trovato" (true/fa
 "vitigni" e "caratteristiche" sono elenchi di stringhe; "gradazione" è un numero; "formato_ml" è un intero. Un dato che non conosci con sicurezza vale null.
 Caratteristiche: solo se certe, per esempio biologico, biodinamico, naturale, senza solfiti aggiunti, non filtrato, dosaggio (brut nature, extra brut, brut…), residuo zuccherino (secco, amabile, dolce).
 "finestra_consumo" indica quando berlo per l'annata indicata; "descrizione" al massimo due frasi. Rispondi in italiano.`;
-  const { text, grounding } = await geminiCall({
+  const { text, grounding } = await geminiFast({
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     ...(mode === 'google' && { tools: [{ google_search: {} }] }),
     generationConfig: { temperature: 0.1 },
-  }, { ...hooks, label: `Dettagli (${mode === 'none' ? 'senza ricerca' : SEARCH_NAME[mode]})` });
+  }, {
+    ...hooks,
+    label: `Dettagli (${mode === 'none' ? 'senza ricerca' : SEARCH_NAME[mode]})`,
+    model: settings.detailsModel || DEFAULT_SETTINGS.detailsModel,
+  }, false);
   const result = parseJsonText(text);
   if (mode === 'google') {
     sources = (grounding?.groundingChunks || [])
@@ -569,7 +591,7 @@ async function recognize(id) {
   }));
   const hooks = { wait, log };
   await updateWine(id, (w) => ({ ...w, log: [] }));
-  log('Avvio', `Ricerca: ${settings.search} → ${searchPlan().join(' → ')} · modello ${settings.geminiModel || DEFAULT_SETTINGS.geminiModel}`);
+  log('Avvio', `Ricerca: ${settings.search} → ${searchPlan().join(' → ')} · modelli: lettura ${settings.geminiModel || DEFAULT_SETTINGS.geminiModel}, dettagli ${settings.detailsModel || DEFAULT_SETTINGS.detailsModel}`);
   try {
     let current = wine;
     if (wine.status !== 'details') {
