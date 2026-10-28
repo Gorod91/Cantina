@@ -1,14 +1,19 @@
 'use strict';
 
-const APP_VERSION = '0.3.2';
+const APP_VERSION = '0.3.3';
 
 // ---------- Impostazioni ----------
 
+// Flash-Lite: sul piano gratuito Flash rispondeva anche dopo 2-5 minuti.
+const RECOMMENDED_MODEL = 'gemini-flash-lite-latest';
+const readModel = () => settings.geminiModel || RECOMMENDED_MODEL;
+const detailsModel = () => settings.detailsModel || RECOMMENDED_MODEL;
+
 const DEFAULT_SETTINGS = {
   geminiKey: '',
-  // Flash-Lite: sul piano gratuito Flash rispondeva anche dopo 2-5 minuti.
-  geminiModel: 'gemini-flash-lite-latest',
-  detailsModel: 'gemini-flash-lite-latest',
+  // Vuoti = modello consigliato (RECOMMENDED_MODEL).
+  geminiModel: '',
+  detailsModel: '',
   googleClientId: '',
   driveFolder: 'Cantina',
   search: 'auto',
@@ -21,6 +26,9 @@ function loadSettings() {
     // Fino alla 0.2.x c'era solo "webCheck" (sì/no).
     if (saved.webCheck === 'no' && !saved.search) saved.search = 'none';
     delete saved.webCheck;
+    // Fino alla 0.3.2 il modulo salvava il modello predefinito di allora come se fosse una scelta.
+    if (saved.geminiModel === 'gemini-flash-latest' && !saved.modelsMigrated) saved.geminiModel = '';
+    saved.modelsMigrated = true;
     return { ...DEFAULT_SETTINGS, ...saved };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -28,6 +36,7 @@ function loadSettings() {
 }
 
 let settings = loadSettings();
+localStorage.setItem('cantina.settings', JSON.stringify(settings));
 
 function saveSettings(next) {
   settings = { ...settings, ...next };
@@ -393,7 +402,7 @@ function describeRequest(body) {
 
 async function geminiFetch(body, hooks = {}) {
   const log = (step, text) => hooks.log?.(`${hooks.label || 'Gemini'} · ${step}`, text);
-  const model = hooks.model || settings.geminiModel || DEFAULT_SETTINGS.geminiModel;
+  const model = hooks.model || readModel();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(settings.geminiKey)}`;
   for (let attempt = 0; ; attempt++) {
     log(`richiesta a ${model}${attempt ? ` (tentativo ${attempt + 1})` : ''}`, describeRequest(body));
@@ -441,13 +450,14 @@ async function geminiFetch(body, hooks = {}) {
 // e si ricorda per ogni modello la prima accettata.
 const FAST_VARIANTS = [
   { thinkingConfig: { thinkingLevel: 'minimal' } },
+  { thinkingConfig: { thinkingLevel: 'low' } },
   { thinkingConfig: { thinkingBudget: 0 } },
   {},
 ];
 const fastVariant = new Map();
 
 async function geminiFast(body, hooks, withImages) {
-  const model = hooks.model || settings.geminiModel || DEFAULT_SETTINGS.geminiModel;
+  const model = hooks.model || readModel();
   for (let v = fastVariant.get(model) || 0; v < FAST_VARIANTS.length; v++) {
     const extra = { ...FAST_VARIANTS[v], ...(withImages && v < FAST_VARIANTS.length - 1 && { mediaResolution: 'MEDIA_RESOLUTION_MEDIUM' }) };
     try {
@@ -467,7 +477,7 @@ async function geminiQuick(blobs, hooks) {
   const out = await geminiFast({
     contents: [{ role: 'user', parts }],
     generationConfig: { responseMimeType: 'application/json', responseSchema: quickSchema(), temperature: 0.1 },
-  }, { ...hooks, label: 'Lettura etichetta', model: settings.geminiModel || DEFAULT_SETTINGS.geminiModel }, true);
+  }, { ...hooks, label: 'Lettura etichetta', model: readModel() }, true);
   return JSON.parse(out.text);
 }
 
@@ -546,7 +556,7 @@ Caratteristiche: solo se certe, per esempio biologico, biodinamico, naturale, se
   }, {
     ...hooks,
     label: `Dettagli (${mode === 'none' ? 'senza ricerca' : SEARCH_NAME[mode]})`,
-    model: settings.detailsModel || DEFAULT_SETTINGS.detailsModel,
+    model: detailsModel(),
   }, false);
   const result = parseJsonText(text);
   if (mode === 'google') {
@@ -591,7 +601,7 @@ async function recognize(id) {
   }));
   const hooks = { wait, log };
   await updateWine(id, (w) => ({ ...w, log: [] }));
-  log('Avvio', `Ricerca: ${settings.search} → ${searchPlan().join(' → ')} · modelli: lettura ${settings.geminiModel || DEFAULT_SETTINGS.geminiModel}, dettagli ${settings.detailsModel || DEFAULT_SETTINGS.detailsModel}`);
+  log('Avvio', `Ricerca: ${settings.search} → ${searchPlan().join(' → ')} · modelli: lettura ${readModel()}, dettagli ${detailsModel()}`);
   try {
     let current = wine;
     if (wine.status !== 'details') {
