@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.2';
+const APP_VERSION = '0.2.3';
 
 // ---------- Impostazioni ----------
 
@@ -360,24 +360,47 @@ function quickSchema() {
   return { type: 'OBJECT', properties: props, required: ['e_un_vino', 'campi_incerti'] };
 }
 
-async function geminiCall(body) {
+// Le chiamate a Gemini partono una alla volta: con molte foto insieme si superava il limite al minuto del piano gratuito.
+let geminiQueue = Promise.resolve();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function geminiCall(body, onWait) {
+  const job = geminiQueue.then(() => geminiFetch(body, onWait));
+  geminiQueue = job.catch(() => {});
+  return job;
+}
+
+async function geminiFetch(body, onWait) {
   const model = settings.geminiModel || DEFAULT_SETTINGS.geminiModel;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(settings.geminiKey)}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const candidate = json.candidates?.[0];
+      const text = candidate?.content?.parts?.filter((p) => !p.thought).map((p) => p.text || '').join('');
+      if (!text) throw new Error('Gemini non ha restituito dati');
+      return { text, grounding: candidate.groundingMetadata };
+    }
+    const details = json.error?.details || [];
+    const retry = details.find((d) => d.retryDelay)?.retryDelay;
+    const seconds = retry ? Math.ceil(parseFloat(retry)) : 0;
+    const daily = details.some((d) => (d.violations || []).some((v) => /PerDay/i.test(v.quotaId || '')));
+    // Limite al minuto: si aspetta il tempo indicato da Gemini e si riprova.
+    if (res.status === 429 && !daily && attempt < 2 && seconds > 0 && seconds <= 70) {
+      onWait?.(seconds);
+      await sleep(seconds * 1000 + 500);
+      continue;
+    }
     const err = new Error('Gemini ' + res.status + ': ' + (json.error?.message || 'errore'));
     err.status = res.status;
+    err.daily = daily;
     throw err;
   }
-  const candidate = json.candidates?.[0];
-  const text = candidate?.content?.parts?.filter((p) => !p.thought).map((p) => p.text || '').join('');
-  if (!text) throw new Error('Gemini non ha restituito dati');
-  return { text, grounding: candidate.groundingMetadata };
 }
 
 // Opzioni per rispondere prima (niente ragionamento, immagini a risoluzione media).
@@ -385,11 +408,11 @@ async function geminiCall(body) {
 const FAST_CONFIG = { thinkingConfig: { thinkingBudget: 0 }, mediaResolution: 'MEDIA_RESOLUTION_MEDIUM' };
 let fastConfigOk = true;
 
-async function geminiQuick(blobs) {
+async function geminiQuick(blobs, onWait) {
   const parts = [{ text: QUICK_PROMPT }];
   for (const b of blobs) parts.push({ inline_data: { mime_type: 'image/jpeg', data: await blobToBase64(b) } });
   const config = { responseMimeType: 'application/json', responseSchema: quickSchema(), temperature: 0.1 };
-  const call = (extra) => geminiCall({ contents: [{ role: 'user', parts }], generationConfig: { ...config, ...extra } });
+  const call = (extra) => geminiCall({ contents: [{ role: 'user', parts }], generationConfig: { ...config, ...extra } }, onWait);
   let out;
   if (fastConfigOk) {
     try {
@@ -412,8 +435,8 @@ function parseJsonText(text) {
 
 // Secondo passaggio: con i dati univoci del vino cerca su Google e compila il resto.
 // La ricerca non si può combinare con lo schema JSON su tutti i modelli, quindi il JSON è chiesto nel testo.
-async function geminiDetails(data) {
-  const web = settings.webCheck !== 'no';
+async function geminiDetails(data, onWait, allowWeb = true) {
+  const web = allowWeb && settings.webCheck !== 'no';
   const who = QUICK.map((f) => data[f.k]).filter(Boolean).join(', ');
   const keys = DETAILS.map((f) => `"${f.k}"`).join(', ');
   const prompt = `${web ? 'Cerca su Google la scheda tecnica di questo vino' : 'Compila la scheda di questo vino'}: ${who}.
@@ -425,7 +448,7 @@ Caratteristiche: solo se certe, per esempio biologico, biodinamico, naturale, se
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     ...(web && { tools: [{ google_search: {} }] }),
     generationConfig: { temperature: 0.1 },
-  });
+  }, onWait);
   const result = parseJsonText(text);
   const sources = (grounding?.groundingChunks || [])
     .map((c) => c.web).filter(Boolean)
@@ -450,11 +473,19 @@ function setPhase(id, phase) {
 async function recognize(id) {
   if (!settings.geminiKey) return;
   const wine = await getWine(id);
+  let phase = null;
+  const enter = (p) => { phase = p; setPhase(id, p); };
+  // Durante l'attesa per il limite al minuto si mostra il conto alla rovescia, poi si torna alla fase in corso.
+  const onWait = (sec) => {
+    const resume = phase;
+    setPhase(id, `In attesa del limite di Gemini (${sec} s)…`);
+    setTimeout(() => phase === resume && setPhase(id, resume), sec * 1000);
+  };
   try {
     let current = wine;
     if (wine.status !== 'details') {
-      setPhase(id, 'quick');
-      const { campi_incerti, e_un_vino, ...quick } = await geminiQuick(wine.photos.filter((p) => !p.lost).map(photoBlob));
+      enter('quick');
+      const { campi_incerti, e_un_vino, ...quick } = await geminiQuick(wine.photos.filter((p) => !p.lost).map(photoBlob), onWait);
       current = await updateWine(id, (w) => ({
         ...w,
         status: e_un_vino === false || !(quick.produttore || quick.nome) ? 'ok' : 'details',
@@ -467,9 +498,20 @@ async function recognize(id) {
       renamePhotos(id);
       if (current.status === 'ok') return;
     }
-    setPhase(id, settings.webCheck !== 'no' ? 'details' : 'detailsOffline');
+    enter(settings.webCheck !== 'no' ? 'details' : 'detailsOffline');
     try {
-      const { result, sources, web } = await geminiDetails(current.data);
+      let out;
+      let skipped = null;
+      try {
+        out = await geminiDetails(current.data, onWait);
+      } catch (e) {
+        // Ricerca Google esaurita o non disponibile nel piano gratuito: dettagli senza ricerca, segnati come incerti.
+        if (settings.webCheck === 'no' || ![400, 403, 429].includes(e.status)) throw e;
+        skipped = e.status === 429 ? 'limite del piano gratuito raggiunto' : 'non disponibile per questo modello';
+        enter('detailsOffline');
+        out = await geminiDetails(current.data, onWait, false);
+      }
+      const { result, sources, web } = out;
       const confirmed = new Set(result.vino_trovato === false ? [] : result.confermati || []);
       await updateWine(id, (w) => {
         const data = { ...w.data };
@@ -485,7 +527,8 @@ async function recognize(id) {
           status: 'ok',
           data: { ...data, ...pickUserEdits(w) },
           uncertain: [...uncertain],
-          web: web ? { found: result.vino_trovato !== false, confirmed: [...confirmed], sources, at: Date.now() } : null,
+          web: web ? { found: result.vino_trovato !== false, confirmed: [...confirmed], sources, at: Date.now() }
+            : skipped ? { skipped, at: Date.now() } : null,
         };
       });
     } catch (e) {
@@ -599,7 +642,7 @@ function wineSubtitle(w) {
 
 function wineBadges(w) {
   const b = [];
-  if (phases.has(w.id)) b.push(PHASE_TEXT[phases.get(w.id)]);
+  if (phases.has(w.id)) b.push(PHASE_TEXT[phases.get(w.id)] || phases.get(w.id));
   else if (['new', 'details'].includes(w.status) && settings.geminiKey) b.push('In coda…');
   if (w.status === 'new' && !settings.geminiKey) b.push('Da riconoscere');
   if (w.status === 'error') b.push('Errore Gemini');
@@ -656,6 +699,7 @@ async function openWine(id) {
   if (w.error) state.push('Errore: ' + w.error);
   if (w.uncertain?.length) state.push('Campi incerti evidenziati in giallo.');
   if (w.web?.error) state.push('Verifica su Google non riuscita: ' + w.web.error);
+  else if (w.web?.skipped) state.push(`Ricerca Google ${w.web.skipped}: dettagli compilati da Gemini senza verifica (in giallo).`);
   else if (w.web && !w.web.found) state.push('Vino non trovato con la ricerca Google.');
   else if (w.web) state.push(`Verificati su Google: ${w.web.confirmed.join(', ') || 'nessun campo'}.`);
   w.photos.forEach((p, i) => p.error && state.push(`Foto ${i + 1}: ${p.error}`));
