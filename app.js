@@ -1,9 +1,13 @@
 'use strict';
 
-const APP_VERSION = '0.3.7';
+const APP_VERSION = '0.3.8';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.3.8', notes: [
+    'Momento migliore per bere il vino, cercato sul web solo per i vini con annata: "Da bere dal", "Al meglio entro" e una nota.',
+    'Nella lista un\'etichetta dice se il vino è da aspettare, pronto o oltre il momento migliore.',
+  ] },
   { v: '0.3.7', notes: ['Note di rilascio: tocca la versione in fondo alla pagina; dopo un aggiornamento un avviso ti porta qui.'] },
   { v: '0.3.6', notes: [
     'Ricerca dei dettagli più mirata: produttore tra virgolette e la parola "vino" (niente più risultati su criptovalute o aziende omonime).',
@@ -378,7 +382,9 @@ const FIELDS = [
   { k: 'formato_ml', l: 'Formato (ml)', type: 'INTEGER' },
   { k: 'affinamento', l: 'Affinamento' },
   { k: 'temperatura_servizio', l: 'Temperatura di servizio' },
-  { k: 'finestra_consumo', l: 'Quando berlo (stima)' },
+  { k: 'bere_dal', l: 'Da bere dal (anno)', type: 'INTEGER', drink: true },
+  { k: 'bere_entro', l: 'Al meglio entro (anno)', type: 'INTEGER', drink: true },
+  { k: 'finestra_consumo', l: 'Quando berlo (nota)', drink: true },
   { k: 'prezzo', l: 'Prezzo stimato a bottiglia (€)', type: 'NUMBER' },
   { k: 'abbinamenti', l: 'Abbinamenti' },
   { k: 'descrizione', l: 'Descrizione' },
@@ -619,7 +625,7 @@ const SEARCH_NAME = { google: 'Google', tavily: 'Tavily' };
 // (senza, "Pietta Kairos scheda tecnica prezzo" restituiva criptovalute e aziende omonime).
 // country fa preferire a Tavily i siti di quel paese: produttore ed enoteche locali.
 const SEARCH_LANG = [
-  { match: /ital/i, word: 'vino', country: 'italy' },
+  { match: /ital/i, word: 'vino', country: 'italy', window: 'quando berlo longevità drinking window' },
   { match: /franc/i, word: 'vin', country: 'france' },
   { match: /spagn|spain|españa/i, word: 'vino', country: 'spain' },
   { match: /argentin/i, word: 'vino', country: 'argentina' },
@@ -657,11 +663,18 @@ async function geminiDetails(data, hooks, mode) {
   let intro = `Compila la scheda di questo vino: ${who}.`;
   let sources = [];
   if (mode === 'google') {
-    intro = `Cerca su Google la scheda tecnica di questo vino: ${who}.
+    intro = `Cerca su Google la scheda tecnica di questo vino: ${who}.${data.annata ? `
+Cerca anche il momento migliore per berlo (finestra di consumo, "drinking window") dell'annata ${data.annata}.` : ''}
 Cerca per esempio: ${searchQuery(data)} (includi sempre la parola "vino" nella lingua del paese di origine, altrimenti trovi pagine che non parlano di vino).
 Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.`;
   } else if (mode === 'tavily') {
-    const found = await tavilySearch(searchQuery(data), searchLang(data).country, hooks.log, hooks.cost);
+    const lang = searchLang(data);
+    const found = await tavilySearch(searchQuery(data), lang.country, hooks.log, hooks.cost);
+    // Seconda ricerca solo con l'annata: le schede tecniche raramente dicono quando berlo, critici e guide sì.
+    if (data.annata) {
+      const more = await tavilySearch(`${searchQuery(data)} ${lang.window || 'drinking window'}`, null, hooks.log, hooks.cost).catch(() => []);
+      found.push(...more.filter((r) => !found.some((f) => f.uri === r.uri)));
+    }
     sources = relevantResults(found, data);
     if (sources.length < found.length) hooks.log?.(`Tavily · scartati ${found.length - sources.length} risultati che non nominano il vino`, '');
     intro = `Compila la scheda di questo vino: ${who}.
@@ -672,7 +685,10 @@ ${sources.map((r, n) => `[${n + 1}] ${r.title} (${r.uri})\n${r.content}`).join('
 Rispondi SOLO con un oggetto JSON con le chiavi ${keys}, "vino_trovato" (true/false) e "confermati" (elenco delle chiavi verificate su una fonte${mode === 'none' ? '; senza fonti è vuoto' : ''}).
 "vitigni" e "caratteristiche" sono elenchi di stringhe; "gradazione" è un numero; "prezzo" è il prezzo medio in euro di una bottiglia da 0,75 l di questa annata in enoteca o negozio online in Italia (numero; una stima ragionevole va bene anche senza fonte esatta); "formato_ml" è un intero. Un dato che non conosci con sicurezza vale null.
 Caratteristiche: solo se certe, per esempio biologico, biodinamico, naturale, senza solfiti aggiunti, non filtrato, dosaggio (brut nature, extra brut, brut…), residuo zuccherino (secco, amabile, dolce).
-"finestra_consumo" indica quando berlo per l'annata indicata; "descrizione" al massimo due frasi. Rispondi in italiano.`;
+${data.annata
+    ? `Momento migliore per bere l'annata ${data.annata}: "bere_dal" e "bere_entro" sono gli anni (interi) della finestra ideale, presi preferibilmente da produttore, critici o guide (drinking window); se le fonti non ne parlano stimali da tipo, denominazione e annata e non metterli in "confermati". "finestra_consumo" è una breve nota, per esempio "al massimo tra il 2027 e il 2032, regge fino al 2036".`
+    : '"bere_dal", "bere_entro" e "finestra_consumo" valgono null: l\'annata non è nota.'}
+"descrizione" al massimo due frasi. Rispondi in italiano.`;
   const { text, grounding } = await geminiFast({
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     ...(mode === 'google' && { tools: [{ google_search: {} }] }),
@@ -770,6 +786,7 @@ async function recognize(id) {
         const data = { ...w.data };
         const uncertain = new Set(w.uncertain || []);
         for (const f of DETAILS) {
+          if (f.drink && !data.annata) continue;
           const v = result[f.k];
           if (v == null || v === '' || (Array.isArray(v) && !v.length)) continue;
           data[f.k] = v;
@@ -914,6 +931,19 @@ function wineSubtitle(w) {
   return [d.denominazione, d.annata, d.colore || d.tipologia, d.stile !== 'fermo' && d.stile, d.prezzo && `~${formatPrice(d.prezzo)}`].filter(Boolean).join(' · ');
 }
 
+// Stato rispetto alla finestra di consumo, solo per i vini con annata.
+function drinkState(d) {
+  d = d || {};
+  const from = Number(d.bere_dal) || null;
+  const to = Number(d.bere_entro) || null;
+  if (!d.annata || (!from && !to)) return null;
+  const year = new Date().getFullYear();
+  if (from && year < from) return `Da aspettare (dal ${from})`;
+  if (to && year > to) return `Oltre il momento migliore (entro ${to})`;
+  if (to && year >= to - 1) return `Da bere presto (entro ${to})`;
+  return `Pronto${to ? ` (entro ${to})` : ''}`;
+}
+
 function wineBadges(w) {
   const b = [];
   if (phases.has(w.id)) b.push(PHASE_TEXT[phases.get(w.id)] || phases.get(w.id));
@@ -922,6 +952,8 @@ function wineBadges(w) {
   if (w.status === 'error') b.push('Errore Gemini');
   if (w.notWine) b.push('Non sembra un vino');
   if (w.photos.some((p) => !p.driveId)) b.push('Drive in attesa');
+  const drink = drinkState(w.data);
+  if (drink) b.push(drink);
   return b;
 }
 
