@@ -479,3 +479,4 @@ body.selecting #wine-list .row-under { display: none; }
 #btn-delete.wide { width: 100%; background: none; border: 1px solid var(--line); }
 .sort-acts button { white-space: nowrap; }
 body.selecting .tabbar { visibility: hidden; }
+.sort-acts { gap: 10px; } .sort-acts button { font-size: 0.8rem; } .sort select { max-width: 150px; }
