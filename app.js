@@ -1,6 +1,8 @@
 'use strict';
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.2.1';
+// Sostituito con il commit dal workflow di pubblicazione.
+const BUILD = '__BUILD__';
 
 // ---------- Impostazioni ----------
 
@@ -724,7 +726,7 @@ async function exportJson() {
 }
 
 function bindUi() {
-  $('#app-version').textContent = APP_VERSION;
+  $('#app-version').textContent = APP_VERSION + (BUILD.startsWith('__') ? '' : ` (${BUILD})`);
   for (const sel of ['#in-camera', '#in-files']) {
     $(sel).addEventListener('change', (e) => {
       const files = [...e.target.files];
@@ -784,6 +786,35 @@ function bindUi() {
 
 // ---------- Aggiornamento automatico ----------
 
+// Su iOS l'app aperta dall'icona spesso viene solo ripresa, senza ricaricare la pagina:
+// a ogni avvio e ritorno in primo piano si confronta la build con version.json e, se è cambiata, si ricarica.
+let updating = false;
+
+async function checkForUpdate() {
+  if (BUILD.startsWith('__') || updating || !navigator.onLine) return;
+  try {
+    const res = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const { build } = await res.json();
+    if (build === BUILD) sessionStorage.removeItem('cantina.updateTries');
+    if (!build || build === BUILD) return;
+    // Non interrompere un riconoscimento o una modifica in corso: si riprova tra poco.
+    if (running.size || $('#dlg-wine').open || $('#dlg-settings').open) {
+      setTimeout(checkForUpdate, 5000);
+      return;
+    }
+    const tries = Number(sessionStorage.getItem('cantina.updateTries') || 0);
+    if (tries >= 3) return;
+    sessionStorage.setItem('cantina.updateTries', String(tries + 1));
+    updating = true;
+    toast('Nuova versione disponibile, aggiorno…');
+    // Il parametro nell'indirizzo evita che la cache di GitHub Pages restituisca la pagina vecchia.
+    location.replace(location.pathname + '?v=' + encodeURIComponent(build));
+  } catch {
+    // Offline o rete instabile: si userà la versione già installata.
+  }
+}
+
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   const hadController = !!navigator.serviceWorker.controller;
@@ -792,7 +823,7 @@ function registerServiceWorker() {
   });
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') reg.update();
+      if (document.visibilityState === 'visible') reg.update().catch(() => {});
     });
   });
 }
@@ -800,6 +831,12 @@ function registerServiceWorker() {
 // ---------- Avvio ----------
 
 bindUi();
+if (location.search.includes('v=')) history.replaceState(null, '', location.pathname);
+checkForUpdate();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkForUpdate();
+});
+window.addEventListener('pageshow', (e) => e.persisted && checkForUpdate());
 updateDriveStatus();
 registerServiceWorker();
 navigator.storage?.persist?.();

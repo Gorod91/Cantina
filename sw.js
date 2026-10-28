@@ -1,6 +1,6 @@
 // Network-first: a ogni apertura l'app scarica l'ultima versione pubblicata;
 // la cache serve solo quando si è offline.
-const CACHE = 'cantina-v1';
+const CACHE = 'cantina-v2';
 const SHELL = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-180.png', 'icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -17,16 +17,19 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+  const url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.endsWith('/version.json')) return;
+  // In cache senza parametri (?v=…), così resta una sola copia per file.
+  const key = url.origin + url.pathname;
   event.respondWith(
     fetch(req, { cache: 'no-store' })
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
+          caches.open(CACHE).then((c) => c.put(key, copy));
         }
         return res;
       })
-      .catch(() => caches.match(req, { ignoreSearch: true })),
+      .catch(() => caches.match(key)),
   );
 });
