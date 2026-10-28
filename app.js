@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.4.1';
+const APP_VERSION = '0.4.2';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.4.2', notes: ['Corretto: dopo l\'aggiornamento alla 0.4 la lista poteva restare vuota e le foto non venivano salvate. I vini non erano persi.', 'Tema scuro sempre attivo.'] },
   { v: '0.4.1', notes: ['Nuova grafica come nei prototipi: titolo grande senza fascia rossa, ricerca con lente, schede e fogli che salgono dal basso. Il riquadro di Drive compare solo se non hai fatto l\'accesso.'] },
   { v: '0.4.0', notes: [
     'Nuova barra in basso: Cantina, fotocamera al centro, Diario. "Importa foto" è sopra la lista.',
@@ -92,26 +93,48 @@ function saveSettings(next) {
 
 const DB_NAME = 'cantina';
 const STORE = 'wines';
-// Bevute: una riga per ogni bottiglia bevuta, a casa o fuori (il Diario).
+// Le bevute (il Diario) stanno in un database a parte: aggiungere una tabella a "cantina" richiedeva
+// di alzarne la versione, e su iPhone l'aggiornamento restava bloccato finché una vecchia copia dell'app era aperta.
+const DRINKS_DB = 'cantina-bevute';
 const DRINKS = 'drinks';
-let dbPromise;
+const dbPromises = new Map();
 
-function db() {
-  dbPromise ??= new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2);
-    req.onupgradeneeded = () => {
-      for (const name of [STORE, DRINKS]) {
-        if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name, { keyPath: 'id' });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-  return dbPromise;
+function openDb(name, version, stores) {
+  if (!dbPromises.has(name)) {
+    dbPromises.set(name, new Promise((resolve, reject) => {
+      const req = version ? indexedDB.open(name, version) : indexedDB.open(name);
+      req.onupgradeneeded = () => {
+        for (const s of stores) {
+          if (!req.result.objectStoreNames.contains(s)) req.result.createObjectStore(s, { keyPath: 'id' });
+        }
+      };
+      req.onsuccess = () => {
+        const d = req.result;
+        // Se una versione più nuova dell'app deve aggiornare il database, questa copia si fa da parte.
+        d.onversionchange = () => d.close();
+        resolve(d);
+      };
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => toast('Chiudi le altre finestre di Cantina aperte per completare l\'aggiornamento.');
+    }));
+  }
+  return dbPromises.get(name);
 }
 
+// "cantina" si apre alla versione che ha già (1, oppure 2 per chi ha avuto la 0.4.0): mai aggiornamenti bloccanti.
+async function db() {
+  const d = await openDb(DB_NAME, null, [STORE]);
+  if (d.objectStoreNames.contains(STORE)) return d;
+  // Telefono nuovo: il database non esisteva ancora.
+  d.close();
+  dbPromises.delete(DB_NAME);
+  return openDb(DB_NAME, d.version + 1, [STORE]);
+}
+
+const drinksDb = () => openDb(DRINKS_DB, 1, [DRINKS]);
+
 async function store(mode, fn, name = STORE) {
-  const d = await db();
+  const d = await (name === DRINKS ? drinksDb() : db());
   return new Promise((resolve, reject) => {
     const tx = d.transaction(name, mode);
     const req = fn(tx.objectStore(name));
@@ -128,6 +151,19 @@ const deleteWine = (id) => store('readwrite', (s) => s.delete(id));
 const allDrinks = () => store('readonly', (s) => s.getAll(), DRINKS);
 const putDrink = (d) => store('readwrite', (s) => s.put({ ...d, updatedAt: Date.now() }), DRINKS);
 const deleteDrink = (id) => store('readwrite', (s) => s.delete(id), DRINKS);
+
+// Chi ha usato la 0.4.0 può avere bevute nella tabella "drinks" del database "cantina": si spostano qui una volta.
+async function migrateDrinks() {
+  const d = await db();
+  if (!d.objectStoreNames.contains(DRINKS)) return;
+  const old = await new Promise((resolve, reject) => {
+    const req = d.transaction(DRINKS, 'readonly').objectStore(DRINKS).getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  const have = new Set((await allDrinks()).map((x) => x.id));
+  for (const x of old) if (!have.has(x.id)) await store('readwrite', (s) => s.put(x), DRINKS);
+}
 
 // Le modifiche sono in coda: caricamento su Drive e riconoscimento lavorano in parallelo sullo stesso vino.
 let writeQueue = Promise.resolve();
@@ -1765,4 +1801,4 @@ updateDriveStatus();
 if (driveToken()) driveFolderId().catch(() => {});
 registerServiceWorker();
 navigator.storage?.persist?.();
-migratePhotos().catch(() => {}).then(render).then(processPending);
+migratePhotos().catch(() => {}).then(() => migrateDrinks().catch(() => {})).then(render).then(processPending);

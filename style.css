@@ -1,42 +1,23 @@
 /* Stessa grafica dei prototipi v2: titolo grande sul fondo, liste a schede, fogli dal basso. */
 :root {
+  /* Tema scuro sempre, come chiesto: niente variante chiara. */
   --wine: #6b1d2a;
-  --bg: #f6f1ef;
-  --fg: #241b1d;
-  --muted: #6e6064;
-  --card: #ffffff;
-  --sunk: #efe7e5;
-  --line: #e4d9d6;
-  --warn: #fff3c4;
-  --wine-text: #6b1d2a;
-  --wine-soft: #f3e4e6;
-  --ok: #2d6a3a;
-  --ok-soft: #e1efe3;
-  --wait: #7d5f0e;
-  --wait-soft: #f6edcf;
-  --soon: #a8461a;
-  --soon-soft: #f8e3d6;
-  color-scheme: light dark;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #141011;
-    --fg: #efe7e8;
-    --muted: #a5999b;
-    --card: #211a1c;
-    --sunk: #1a1415;
-    --line: #3a3032;
-    --warn: #4a3f12;
-    --wine-text: #e58a9a;
-    --wine-soft: #3b2128;
-    --ok: #86c793;
-    --ok-soft: #1f3324;
-    --wait: #dcbc5e;
-    --wait-soft: #3a3115;
-    --soon: #ec9662;
-    --soon-soft: #40261a;
-  }
+  --bg: #141011;
+  --fg: #efe7e8;
+  --muted: #a5999b;
+  --card: #211a1c;
+  --sunk: #1a1415;
+  --line: #3a3032;
+  --warn: #4a3f12;
+  --wine-text: #e58a9a;
+  --wine-soft: #3b2128;
+  --ok: #86c793;
+  --ok-soft: #1f3324;
+  --wait: #dcbc5e;
+  --wait-soft: #3a3115;
+  --soon: #ec9662;
+  --soon-soft: #40261a;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -222,7 +203,7 @@ footer { padding-bottom: calc(env(safe-area-inset-bottom) + 84px); }
   width: 50px; height: 50px; border-radius: 50%;
   display: grid; place-items: center;
   background: var(--wine); color: #fff; cursor: pointer;
-  box-shadow: 0 0 0 4px var(--card), 0 6px 14px -6px rgba(107, 29, 42, 0.6);
+  box-shadow: 0 0 0 4px var(--card), 0 6px 14px -6px rgba(0, 0, 0, 0.6);
 }
 .toast { bottom: calc(env(safe-area-inset-bottom) + 84px); }
 
@@ -382,3 +363,13 @@ button.link { background: none; border: none; padding: 4px; color: inherit; font
   font-size: 0.75rem;
 }
 #btn-login { white-space: nowrap; }
+
+.badge {
+  display: inline-block;
+  margin: 3px 4px 0 0;
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--warn);
+  font-size: 0.7rem;
+}
+.toast { bottom: calc(env(safe-area-inset-bottom) + 84px); }
