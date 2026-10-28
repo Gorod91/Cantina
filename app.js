@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.4.2';
+const APP_VERSION = '0.4.3';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.4.3', notes: ['Se il database del telefono non risponde o c\'è un errore, compare un riquadro con i dettagli da copiare.'] },
   { v: '0.4.2', notes: ['Corretto: dopo l\'aggiornamento alla 0.4 la lista poteva restare vuota e le foto non venivano salvate. I vini non erano persi.', 'Tema scuro sempre attivo.'] },
   { v: '0.4.1', notes: ['Nuova grafica come nei prototipi: titolo grande senza fascia rossa, ricerca con lente, schede e fogli che salgono dal basso. Il riquadro di Drive compare solo se non hai fatto l\'accesso.'] },
   { v: '0.4.0', notes: [
@@ -99,10 +100,31 @@ const DRINKS_DB = 'cantina-bevute';
 const DRINKS = 'drinks';
 const dbPromises = new Map();
 
+// Riquadro di diagnosi: compare se il database non risponde o se c'è un errore, con i dettagli da mandare.
+const diagLines = [];
+function diag(line, show = true) {
+  diagLines.push(`${new Date().toLocaleTimeString('it-IT')} ${line}`);
+  const box = document.getElementById('diag');
+  if (!box) return;
+  document.getElementById('diag-log').textContent = diagLines.join('\n');
+  if (show) box.hidden = false;
+}
+window.addEventListener('error', (e) => diag(`Errore: ${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`));
+window.addEventListener('unhandledrejection', (e) => diag(`Errore: ${e.reason?.message || e.reason}`));
+
 function openDb(name, version, stores) {
   if (!dbPromises.has(name)) {
     dbPromises.set(name, new Promise((resolve, reject) => {
       const req = version ? indexedDB.open(name, version) : indexedDB.open(name);
+      let done = false;
+      setTimeout(async () => {
+        if (done) return;
+        let list = '';
+        try { list = (await indexedDB.databases()).map((x) => `${x.name} v${x.version}`).join(', '); } catch (e) { list = 'elenco non disponibile'; }
+        diag(`Il database "${name}" non risponde da 4 secondi. Database presenti: ${list || 'nessuno'}.`);
+      }, 4000);
+      req.addEventListener('success', () => { done = true; });
+      req.addEventListener('error', () => { done = true; diag(`Database "${name}": ${req.error?.name} ${req.error?.message}`); });
       req.onupgradeneeded = () => {
         for (const s of stores) {
           if (!req.result.objectStoreNames.contains(s)) req.result.createObjectStore(s, { keyPath: 'id' });
@@ -115,7 +137,7 @@ function openDb(name, version, stores) {
         resolve(d);
       };
       req.onerror = () => reject(req.error);
-      req.onblocked = () => toast('Chiudi le altre finestre di Cantina aperte per completare l\'aggiornamento.');
+      req.onblocked = () => diag(`Database "${name}" bloccato da un'altra copia dell'app aperta.`);
     }));
   }
   return dbPromises.get(name);
@@ -1639,6 +1661,10 @@ function blockPageZoom() {
 function bindUi() {
   bindViewer();
   blockPageZoom();
+  $('#diag-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(`Cantina ${APP_VERSION} (${BUILD})\n${navigator.userAgent}\n${diagLines.join('\n')}`); toast('Dettagli copiati'); } catch { toast('Copia non riuscita'); }
+  });
+  $('#diag-reload').addEventListener('click', () => location.reload());
   $('#app-version').textContent = APP_VERSION + (BUILD === 'dev' ? '' : ` (${BUILD})`);
   $('#btn-notes').addEventListener('click', showReleaseNotes);
   announceUpdate();
