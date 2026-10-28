@@ -442,3 +442,16 @@ dialog.sheet.with-bar::before { display: none; }
 .notes-box { margin: 0; cursor: text; }
 .notes-box textarea { background: var(--card); resize: none; overflow: hidden; min-height: 52px; field-sizing: content; line-height: 1.45; }
 #wine-list .meta .note { color: var(--wine-text); font-style: italic; }
+
+/* Raggruppa le foto */
+#group-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+#group-list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 14px; background: var(--sunk); border: 1.5px solid transparent; }
+#group-list li.target { border-color: var(--wine-text); border-style: dashed; cursor: pointer; }
+.gnum { width: 22px; height: 22px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--card); color: var(--muted); font-size: 0.75rem; font-weight: 700; }
+.gphotos { display: flex; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; }
+.gphoto { padding: 0; border-radius: 8px; background: none; border: 2px solid transparent; flex: none; }
+.gphoto img { display: block; width: 52px; height: 70px; object-fit: cover; border-radius: 6px; }
+.gphoto.sel { border-color: var(--wine-text); transform: translateY(-2px); }
+.gcount { font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+.check.twin { flex-direction: column; align-items: stretch; background: var(--wine-soft); color: var(--fg); }
+.twin-acts { display: flex; gap: 8px; justify-content: flex-end; }

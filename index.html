@@ -117,13 +117,16 @@
   </nav>
   <input id="in-files" type="file" accept="image/*" multiple hidden>
 
-  <dialog id="dlg-same" class="sheet">
+  <dialog id="dlg-group" class="sheet">
     <form method="dialog">
-      <h2>Foto di uno stesso vino?</h2>
-      <p class="hint">Se sono fronte e retro della stessa bottiglia diventano un solo vino.</p>
+      <h2>Raggruppa le foto</h2>
+      <p class="hint" id="group-status"></p>
+      <ul id="group-list"></ul>
+      <p class="hint" id="group-hint"></p>
       <div class="actions">
-        <button value="many">Vini diversi</button>
-        <button value="same" class="primary">Stesso vino</button>
+        <button value="ok" class="primary" id="btn-group-ok">Aggiungi</button>
+        <button type="button" id="btn-group-split" hidden>Separa</button>
+        <button value="cancel" formnovalidate>Annulla</button>
       </div>
     </form>
   </dialog>
@@ -182,6 +185,13 @@
       <div class="wine-head">
         <div class="wname" id="wine-name" tabindex="-1" autofocus></div>
         <div class="wsub" id="wine-sub"></div>
+      </div>
+      <div class="check twin" id="wine-twin" hidden>
+        <span id="twin-text"></span>
+        <span class="twin-acts">
+          <button type="button" class="small" id="btn-not-twin">Sono diversi</button>
+          <button type="button" class="small primary" id="btn-merge">Unisci</button>
+        </span>
       </div>
       <div class="check" id="wine-check" hidden>
         <span>Alcuni dati letti dall'etichetta sono da controllare.</span>

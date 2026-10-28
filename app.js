@@ -1,9 +1,13 @@
 'use strict';
 
-const APP_VERSION = '0.6.4';
+const APP_VERSION = '0.7.0';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.7.0', notes: [
+    'Più foto insieme: Gemini propone quali sono della stessa bottiglia (fronte e retro, due scatti) e tu confermi nella schermata Raggruppa, dove puoi spostare o separare le foto con un tocco.',
+    'Doppioni: se due vini hanno stesso produttore, nome e annata, la lista lo segnala e la scheda propone di unirli (bottiglie sommate, foto, note e bevute insieme).',
+  ] },
   { v: '0.6.4', notes: ['Le mie note: nella scheda di ogni vino c\'è un riquadro per scrivere note personali, visibili anche nella lista e trovabili con la ricerca.'] },
   { v: '0.6.3', notes: ['Diario: le bevute hanno la stessa targhetta della cantina (foto, calice, nome, produttore) con in più dove, prezzo, note e voto.'] },
   { v: '0.6.2', notes: ['Spumanti: bollicine che salgono sopra il calice, così si distinguono dai bianchi fermi.'] },
@@ -1023,13 +1027,20 @@ async function processPending() {
   }
 }
 
-async function addFiles(files, sameWine) {
+async function addFiles(files) {
   if (!files.length) return;
-  const groups = sameWine ? [files] : files.map((f) => [f]);
-  for (const group of groups) {
+  const groups = [];
+  for (const f of files) {
+    try { groups.push([await preparePhoto(f)]); } catch (e) { toast(e.message); }
+  }
+  await addPhotoGroups(groups);
+}
+
+// Ogni gruppo di foto già preparate diventa un vino.
+async function addPhotoGroups(groups) {
+  if (!groups.length) return;
+  for (const photos of groups) {
     try {
-      const photos = [];
-      for (const f of group) photos.push(await preparePhoto(f));
       const wine = {
         id: crypto.randomUUID(),
         createdAt: Date.now(),
@@ -1052,13 +1063,172 @@ async function addFiles(files, sameWine) {
   else if (!driveToken()) toast('Foto salvate sul telefono. Accedi con Google per caricarle su Drive.');
 }
 
+// ---------- Più foto insieme: raggruppamento ----------
+
+// Gemini guarda le miniature di tutte le foto in una sola chiamata e dice quali ritraggono la stessa bottiglia.
+async function geminiGroup(photos) {
+  const parts = [{ text: `Ecco ${photos.length} foto di bottiglie di vino, numerate da 1 a ${photos.length}.
+Raggruppa le foto che ritraggono la STESSA bottiglia (per esempio fronte e retroetichetta, oppure due scatti dello stesso vino).
+Usa produttore, nome, annata, forma e colore della bottiglia e della capsula. Nel dubbio tieni le foto separate.
+Ogni numero deve comparire esattamente una volta.` }];
+  for (const [i, p] of photos.entries()) {
+    parts.push({ text: `Foto ${i + 1}:` });
+    parts.push({ inline_data: { mime_type: 'image/jpeg', data: await blobToBase64(new Blob([p.thumbBytes], { type: 'image/jpeg' })) } });
+  }
+  const out = await geminiFast({
+    contents: [{ role: 'user', parts }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0, responseSchema: {
+      type: 'OBJECT', properties: { gruppi: { type: 'ARRAY', items: { type: 'ARRAY', items: { type: 'INTEGER' } } } }, required: ['gruppi'],
+    } },
+  }, { label: 'Raggruppamento foto', model: readModel() }, true);
+  // Si accettano solo numeri validi, ognuno una volta; quelli mancanti restano da soli.
+  const seen = new Set();
+  const groups = [];
+  for (const g of JSON.parse(out.text).gruppi || []) {
+    const ok = (g || []).map((n) => n - 1).filter((i) => Number.isInteger(i) && i >= 0 && i < photos.length && !seen.has(i));
+    ok.forEach((i) => seen.add(i));
+    if (ok.length) groups.push(ok);
+  }
+  photos.forEach((_, i) => seen.has(i) || groups.push([i]));
+  return groups;
+}
+
+const grouping = { batch: 0, photos: [], groups: [], selected: null };
+
+function renderGroups() {
+  releaseUrls('group');
+  const g = grouping;
+  $('#group-list').innerHTML = g.groups.map((idx, gi) => `
+    <li data-group="${gi}" class="${g.selected != null && !idx.includes(g.selected) ? 'target' : ''}">
+      <span class="gnum">${gi + 1}</span>
+      <div class="gphotos">${idx.map((i) => `<button type="button" class="gphoto${g.selected === i ? ' sel' : ''}" data-photo="${i}"><img src="${blobUrl(new Blob([g.photos[i].thumbBytes], { type: 'image/jpeg' }), 'group')}" alt="Foto ${i + 1}"></button>`).join('')}</div>
+      <span class="gcount">${idx.length > 1 ? `${idx.length} foto, un vino` : '1 foto'}</span>
+    </li>`).join('');
+  const sel = g.selected != null;
+  $('#group-hint').textContent = sel
+    ? 'Tocca un altro vino per spostarci la foto, oppure "Separa" per metterla da sola.'
+    : 'Le foto nella stessa riga diventano un solo vino. Tocca una foto per spostarla.';
+  $('#btn-group-split').hidden = !sel;
+  const n = g.groups.length;
+  $('#btn-group-ok').textContent = `Aggiungi ${n} ${n === 1 ? 'vino' : 'vini'}`;
+}
+
+async function startGrouping(files) {
+  const batch = ++grouping.batch;
+  Object.assign(grouping, { photos: [], groups: [], selected: null });
+  $('#group-status').textContent = 'Preparo le foto…';
+  $('#group-list').innerHTML = '';
+  $('#btn-group-ok').disabled = true;
+  $('#dlg-group').returnValue = '';
+  $('#dlg-group').showModal();
+  for (const f of files) {
+    try { grouping.photos.push(await preparePhoto(f)); } catch (e) { toast(e.message); }
+  }
+  if (batch !== grouping.batch) return;
+  grouping.groups = grouping.photos.map((_, i) => [i]);
+  renderGroups();
+  $('#btn-group-ok').disabled = false;
+  if (!settings.geminiKey || grouping.photos.length < 2) {
+    $('#group-status').textContent = settings.geminiKey ? '' : 'Senza chiave Gemini le foto vanno raggruppate a mano.';
+    return;
+  }
+  $('#group-status').textContent = 'Gemini cerca le foto della stessa bottiglia…';
+  try {
+    const groups = await geminiGroup(grouping.photos);
+    if (batch !== grouping.batch || !$('#dlg-group').open) return;
+    // Se nel frattempo hai già spostato qualcosa, la proposta di Gemini non sovrascrive le tue scelte.
+    if (grouping.groups.length === grouping.photos.length && grouping.selected == null) grouping.groups = groups;
+    const joined = groups.filter((x) => x.length > 1).length;
+    $('#group-status').textContent = joined ? `Gemini ha trovato ${joined === 1 ? 'una bottiglia' : `${joined} bottiglie`} con più foto. Controlla e conferma.` : 'Gemini non ha trovato foto della stessa bottiglia. Controlla e conferma.';
+    renderGroups();
+  } catch (e) {
+    if (batch === grouping.batch) $('#group-status').textContent = `Raggruppamento automatico non riuscito (${e.message}): raggruppa a mano.`;
+  }
+}
+
+function bindGrouping() {
+  $('#group-list').addEventListener('click', (e) => {
+    const g = grouping;
+    const photo = e.target.closest('[data-photo]');
+    const row = e.target.closest('[data-group]');
+    if (!row) return;
+    const gi = Number(row.dataset.group);
+    if (g.selected == null) {
+      if (photo) g.selected = Number(photo.dataset.photo);
+    } else if (photo && Number(photo.dataset.photo) === g.selected) {
+      g.selected = null;
+    } else if (!g.groups[gi].includes(g.selected)) {
+      // Sposta la foto scelta in questo vino.
+      g.groups = g.groups.map((idx) => idx.filter((i) => i !== g.selected));
+      g.groups[gi].push(g.selected);
+      g.groups = g.groups.filter((idx) => idx.length);
+      g.selected = null;
+    } else if (photo) {
+      g.selected = Number(photo.dataset.photo);
+    }
+    renderGroups();
+  });
+  $('#btn-group-split').addEventListener('click', () => {
+    const g = grouping;
+    if (g.selected == null) return;
+    g.groups = g.groups.map((idx) => idx.filter((i) => i !== g.selected)).filter((idx) => idx.length);
+    g.groups.push([g.selected]);
+    g.selected = null;
+    renderGroups();
+  });
+  $('#dlg-group').addEventListener('close', () => {
+    const g = grouping;
+    g.batch++;
+    releaseUrls('group');
+    if ($('#dlg-group').returnValue === 'ok') addPhotoGroups(g.groups.map((idx) => idx.map((i) => g.photos[i])));
+    Object.assign(g, { photos: [], groups: [], selected: null });
+  });
+}
+
+// ---------- Doppioni ----------
+
+// Due vini con stesso produttore, nome e annata sono probabilmente la stessa bottiglia inserita due volte.
+const norm = (v) => String(v ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+function twinKey(w) {
+  const d = w.data || {};
+  if (!d.produttore || !(d.nome || d.denominazione) || w.status === 'new') return null;
+  return [norm(d.produttore), norm(d.nome || d.denominazione), d.annata || ''].join('|');
+}
+function findTwin(w, wines) {
+  const k = twinKey(w);
+  if (!k) return null;
+  return wines.find((x) => x.id !== w.id && twinKey(x) === k && !(w.notTwin || []).includes(x.id) && !(x.notTwin || []).includes(w.id)) || null;
+}
+
+// Unisce nel vino inserito per primo: bottiglie sommate, foto e note insieme, bevute spostate.
+async function mergeWines(aId, bId) {
+  const [a, b] = [await getWine(aId), await getWine(bId)];
+  if (!a || !b) return;
+  const [keep, drop] = a.createdAt <= b.createdAt ? [a, b] : [b, a];
+  await updateWine(keep.id, (cur) => ({
+    ...cur,
+    quantita: (Number(cur.quantita) || 0) + (Number(drop.quantita) || 0),
+    photos: [...cur.photos, ...drop.photos],
+    nota: [cur.nota, drop.nota].filter(Boolean).join('\n'),
+    data: { ...(drop.data || {}), ...Object.fromEntries(Object.entries(cur.data || {}).filter(([, v]) => v != null && v !== '')) },
+    prezzo_pagato: cur.prezzo_pagato ?? drop.prezzo_pagato ?? null,
+    acquisto_luogo: cur.acquisto_luogo || drop.acquisto_luogo || '',
+  }));
+  for (const d of await allDrinks()) {
+    if (d.wineId === drop.id) await putDrink({ ...d, wineId: keep.id });
+  }
+  await deleteWine(drop.id);
+  scheduleRender();
+  return keep.id;
+}
+
 // ---------- Interfaccia ----------
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 // Gli URL della lista e del dettaglio si liberano separatamente, così un aggiornamento della lista non rompe il dettaglio aperto.
-const objectUrls = { list: [], dialog: [], drink: [] };
+const objectUrls = { list: [], dialog: [], drink: [], group: [] };
 function blobUrl(blob, group) {
   const u = URL.createObjectURL(blob);
   objectUrls[group].push(u);
@@ -1293,6 +1463,7 @@ async function render() {
   ].filter(Boolean).join(' · ');
   $('#wine-list').innerHTML = shown.map((w) => {
     const state = drinkState(w.data);
+    const twin = findTwin(w, wines);
     const p = paidOrEstimate(w);
     const price = p ? `${Number(w.prezzo_pagato) > 0 ? '' : '~'}${formatPrice(p)}` : '';
     return `
@@ -1304,7 +1475,7 @@ async function render() {
           <strong>${colorIcon(w.data)}${esc(listTitle(w))}</strong>
           <small>${esc(listSubtitle(w))}</small>
           ${w.nota ? `<small class="note">${esc(w.nota)}</small>` : ''}
-          ${wineBadges(w).map((b) => `<span class="badge">${esc(b)}</span>`).join('')}
+          ${[...wineBadges(w), twin && 'Doppione? Apri per unire'].filter(Boolean).map((b) => `<span class="badge">${esc(b)}</span>`).join('')}
         </div>
         <div class="right">
           <span class="qty">${price ? `<span class="price">${esc(price)}</span> ` : ''}×${Number(w.quantita) || 0}</span>
@@ -1790,6 +1961,13 @@ async function openWine(id) {
   // I dati da modificare stanno in fondo, chiusi; si aprono da soli solo se il vino non è stato riconosciuto.
   $('#wine-edit').open = w.status !== 'ok' || !!w.error;
   $('#wine-check').hidden = !w.uncertain?.length || $('#wine-edit').open;
+  const twin = findTwin(w, await allWines());
+  $('#wine-twin').hidden = !twin;
+  if (twin) {
+    $('#twin-text').textContent = `Sembra lo stesso vino di un'altra scheda (${listTitle(twin)}, ${Number(twin.quantita) || 0} bott., aggiunta il ${new Date(twin.createdAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}).`;
+    $('#btn-merge').dataset.twin = twin.id;
+    $('#btn-not-twin').dataset.twin = twin.id;
+  }
   $('#dlg-wine').returnValue = '';
   $('#dlg-wine').showModal();
   $('#dlg-wine').scrollTop = 0;
@@ -1976,20 +2154,28 @@ function bindUi() {
   $('#btn-notes').addEventListener('click', showReleaseNotes);
   announceUpdate();
   // Il tasto fotocamera non forza la fotocamera: iOS propone Scatta foto, Libreria foto o Scegli file.
-  // Più foto scelte insieme: si chiede se sono fronte e retro dello stesso vino.
-  let importing = [];
+  // Più foto scelte insieme: Gemini propone quali sono della stessa bottiglia e si conferma nella schermata Raggruppa.
   $('#btn-import').addEventListener('click', () => $('#in-files').click());
   for (const sel of ['#in-camera', '#in-files']) $(sel).addEventListener('change', (e) => {
-    importing = [...e.target.files];
+    const files = [...e.target.files];
     e.target.value = '';
-    if (importing.length < 2) return addFiles(importing, false);
-    $('#dlg-same').returnValue = '';
-    $('#dlg-same').showModal();
+    if (files.length < 2) addFiles(files);
+    else startGrouping(files);
   });
-  $('#dlg-same').addEventListener('close', () => {
-    const same = $('#dlg-same').returnValue === 'same';
-    if ($('#dlg-same').returnValue) addFiles(importing, same);
-    importing = [];
+  bindGrouping();
+  $('#btn-merge').addEventListener('click', async () => {
+    const id = editingId;
+    const twin = $('#btn-merge').dataset.twin;
+    $('#dlg-wine').close();
+    const kept = await mergeWines(id, twin);
+    toast('Vini uniti: bottiglie, foto e bevute ora sono in un\'unica scheda.');
+    if (kept) openWine(kept);
+  });
+  $('#btn-not-twin').addEventListener('click', async () => {
+    const id = editingId;
+    const twin = $('#btn-not-twin').dataset.twin;
+    await updateWine(id, (w) => ({ ...w, notTwin: [...(w.notTwin || []), twin] }));
+    $('#wine-twin').hidden = true;
   });
   document.querySelectorAll('.tab[data-view]').forEach((t) => t.addEventListener('click', () => showView(t.dataset.view)));
   $('#btn-filters').addEventListener('click', () => { renderFilters(); $('#dlg-filters').showModal(); });
@@ -2145,7 +2331,7 @@ const BUILD = (document.querySelector('meta[name="app-version"]') || {}).content
 
 /** Mai ricaricare durante un riconoscimento o con una scheda aperta. */
 function busyNow() {
-  return running.size > 0 || swiping || ['#dlg-wine', '#dlg-settings', '#dlg-drink', '#dlg-same'].some((s) => $(s).open);
+  return running.size > 0 || swiping || ['#dlg-wine', '#dlg-settings', '#dlg-drink', '#dlg-group'].some((s) => $(s).open);
 }
 
 async function checkForUpdate() {
