@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.9.0';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.9.0', notes: ['Tappa 3, sincronizzazione: con Drive collegato, cantina, diario ed eliminazioni restano uguali su tutti i tuoi dispositivi. Si sincronizza a ogni modifica, quando riapri l\'app e ogni due minuti; se lo stesso vino è stato modificato in due posti vale la modifica più recente.', 'Le foto aggiunte su un altro dispositivo vengono scaricate da Drive, con miniatura e ritaglio.', 'Chiavi Gemini e Tavily e modelli scelti passano da soli agli altri tuoi dispositivi (file cantina-impostazioni.json su Drive).'] },
   { v: '0.8.0', notes: ['Versione per PC (finestra larga almeno 1000 px): barra laterale, lista a colonne ordinabile toccando le intestazioni, scheda del vino fissa a destra (cliccando un altro vino si salva e passa a quello), foto trascinabili sulla finestra, / per cercare, Esc per chiudere la scheda.'] },
   { v: '0.7.6', notes: ['Fronte e retro con la fotocamera: dopo la foto tocca l\'avviso "fotografa anche il retro". Nella scheda del vino c\'è "Aggiungi foto". Il vino viene riletto con tutte le foto.'] },
   { v: '0.7.5', notes: ['Raggruppa le foto più comodo: foto grandi, lente per vederle intere, scegli le foto dello stesso vino e premi Unisci (o Separa per dividerle).'] },
@@ -194,12 +195,17 @@ async function store(mode, fn, name = STORE) {
 
 const getWine = (id) => store('readonly', (s) => s.get(id));
 const allWines = () => store('readonly', (s) => s.getAll());
-const putWine = (w) => store('readwrite', (s) => s.put({ ...w, updatedAt: Date.now() }));
-const deleteWine = (id) => store('readwrite', (s) => s.delete(id));
+// Ogni modifica fatta qui va anche su Drive; le scritture "raw" (dati arrivati da Drive, foto scaricate) no.
+const putWine = (w) => store('readwrite', (s) => s.put({ ...w, updatedAt: Date.now() })).then((r) => { syncSoon(); return r; });
+const deleteWine = (id) => { addTombstone('wines', id); return store('readwrite', (s) => s.delete(id)).then((r) => { syncSoon(); return r; }); };
+const rawPutWine = (w) => store('readwrite', (s) => s.put(w));
+const rawDeleteWine = (id) => store('readwrite', (s) => s.delete(id));
 
 const allDrinks = () => store('readonly', (s) => s.getAll(), DRINKS);
-const putDrink = (d) => store('readwrite', (s) => s.put({ ...d, updatedAt: Date.now() }), DRINKS);
-const deleteDrink = (id) => store('readwrite', (s) => s.delete(id), DRINKS);
+const putDrink = (d) => store('readwrite', (s) => s.put({ ...d, updatedAt: Date.now() }), DRINKS).then((r) => { syncSoon(); return r; });
+const deleteDrink = (id) => { addTombstone('drinks', id); return store('readwrite', (s) => s.delete(id), DRINKS).then((r) => { syncSoon(); return r; }); };
+const rawPutDrink = (d) => store('readwrite', (s) => s.put(d), DRINKS);
+const rawDeleteDrink = (id) => store('readwrite', (s) => s.delete(id), DRINKS);
 
 // Chi ha usato la 0.4.0 può avere bevute nella tabella "drinks" del database "cantina": si spostano qui una volta.
 async function migrateDrinks() {
@@ -266,6 +272,8 @@ async function preparePhoto(file) {
   };
 }
 
+// Una foto arrivata da un altro dispositivo non ha ancora i byte finché non viene scaricata da Drive.
+const hasBytes = (p) => !!(p.blob || p.bytes);
 const photoBlob = (p) => p.blob || new Blob([p.bytes], { type: 'image/jpeg' });
 const thumbBlob = (p) => p.thumb || new Blob([p.cropBytes || p.thumbBytes], { type: 'image/jpeg' });
 // Nella scheda la prima foto si mostra ritagliata sulla bottiglia, se il ritaglio c'è.
@@ -296,11 +304,12 @@ async function cropToBox(blob, box) {
 
 async function applyCrop(id, box) {
   const w = await getWine(id);
-  const i = w?.photos.findIndex((p) => !p.lost);
+  const i = w?.photos.findIndex((p) => !p.lost && hasBytes(p));
   if (!w || i < 0) return false;
   const cropBytes = await cropToBox(photoBlob(w.photos[i]), box).catch(() => null);
   if (!cropBytes) return false;
-  await updateWine(id, (cur) => ({ ...cur, photos: cur.photos.map((p, j) => (j === i ? { ...p, cropBytes } : p)) }));
+  // Il riquadro resta nella scheda: gli altri dispositivi rifanno il ritaglio dalla foto scaricata.
+  await updateWine(id, (cur) => ({ ...cur, photos: cur.photos.map((p, j) => (j === i ? { ...p, cropBytes, box } : p)) }));
   return true;
 }
 
@@ -367,7 +376,7 @@ function initTokenClient() {
       }));
       updateDriveStatus();
       driveFolderId().catch(() => {});
-      processPending();
+      syncNow().then(processPending);
     },
   });
   return tokenClient;
@@ -395,6 +404,7 @@ function updateDriveStatus() {
   // Il riquadro compare solo quando serve accedere.
   $('#drive-status').textContent = 'Drive non collegato';
   $('#status-bar').hidden = ok;
+  updateSyncStatus();
 }
 
 async function driveFetch(url, opts = {}) {
@@ -499,7 +509,7 @@ async function uploadPhotos(id) {
   if (!driveToken()) return;
   let wine = await getWine(id);
   for (let i = 0; i < wine.photos.length; i++) {
-    if (wine.photos[i].driveId) continue;
+    if (wine.photos[i].driveId || !hasBytes(wine.photos[i])) continue;
     try {
       const driveId = await driveUpload(photoBlob(wine.photos[i]), photoName(wine, i));
       wine = await updateWine(id, (w) => {
@@ -531,6 +541,253 @@ async function renamePhotos(id) {
     } catch {
       // Il nome provvisorio va bene comunque.
     }
+  }
+}
+
+// ---------- Sincronizzazione con Drive ----------
+
+// La cartella su Drive è la copia comune: cantina.json contiene vini, bevute e vini eliminati.
+// A ogni modifica e a ogni apertura l'app unisce la sua copia con quella di Drive:
+// per ogni vino e ogni bevuta vale la versione modificata più di recente.
+const SYNC_FILE = 'cantina.json';
+// Chiavi e modelli stanno in un file a parte nella radice di Drive, mai nella cartella che si può condividere.
+const SETTINGS_FILE = 'cantina-impostazioni.json';
+const SYNCED_SETTINGS = ['geminiKey', 'geminiModel', 'detailsModel', 'search', 'tavilyKey'];
+const DRIVE_FILES = 'https://www.googleapis.com/drive/v3/files';
+
+function tombstones() {
+  try {
+    const t = JSON.parse(localStorage.getItem('cantina.deleted') || '{}');
+    return { wines: t.wines || {}, drinks: t.drinks || {} };
+  } catch {
+    return { wines: {}, drinks: {} };
+  }
+}
+function saveTombstones(t) {
+  try { localStorage.setItem('cantina.deleted', JSON.stringify(t)); } catch {}
+}
+function addTombstone(kind, id) {
+  const t = tombstones();
+  t[kind][id] = Date.now();
+  saveTombstones(t);
+}
+
+const sync = { timer: null, running: null, again: false, at: Number(localStorage.getItem('cantina.syncedAt')) || 0, error: null };
+
+function syncSoon(ms = 3000) {
+  if (!driveToken()) return;
+  clearTimeout(sync.timer);
+  sync.timer = setTimeout(syncNow, ms);
+}
+
+function syncNow() {
+  if (!driveToken()) return Promise.resolve();
+  if (sync.running) { sync.again = true; return sync.running; }
+  clearTimeout(sync.timer);
+  updateSyncStatus(true);
+  sync.running = runSync()
+    .then(() => { sync.error = null; sync.at = Date.now(); localStorage.setItem('cantina.syncedAt', String(sync.at)); })
+    .catch((e) => { sync.error = e.message; diag(`Sincronizzazione non riuscita: ${e.message}`, false); })
+    .finally(() => {
+      sync.running = null;
+      updateSyncStatus();
+      if (sync.again) { sync.again = false; syncSoon(500); }
+    });
+  return sync.running;
+}
+
+function updateSyncStatus(busy) {
+  const el = $('#sync-status');
+  if (!el) return;
+  const time = (t) => new Date(t).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  el.textContent = !driveToken() ? 'Drive non collegato: i dati restano su questo dispositivo'
+    : busy || sync.running ? 'Sincronizzo con Drive…'
+    : sync.error ? `Sincronizzazione non riuscita (${sync.error})`
+    : sync.at ? `Sincronizzata con Drive alle ${time(sync.at)}` : 'Non ancora sincronizzata';
+  el.classList.toggle('err', !!sync.error && !busy);
+}
+
+async function driveFindFile(name, parent) {
+  const q = `name='${name.replace(/'/g, "\\'")}' and trashed=false and ` + (parent ? `'${parent}' in parents` : `'root' in parents`);
+  const res = await driveFetch(`${DRIVE_FILES}?fields=files(id)&orderBy=createdTime&q=` + encodeURIComponent(q));
+  return res.files?.[0]?.id || null;
+}
+
+async function driveWriteJson(fileId, name, parent, obj) {
+  const json = JSON.stringify(obj);
+  if (fileId) {
+    await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=id`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: json,
+    });
+    return fileId;
+  }
+  const boundary = 'cantina' + Math.random().toString(36).slice(2);
+  const meta = JSON.stringify({ name, mimeType: 'application/json', ...(parent && { parents: [parent] }) });
+  const res = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body: `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${json}\r\n--${boundary}--`,
+  });
+  return res.id;
+}
+
+async function driveBlob(fileId) {
+  const res = await fetch(`${DRIVE_FILES}/${fileId}?alt=media`, { headers: { Authorization: 'Bearer ' + driveToken() } });
+  if (!res.ok) throw Object.assign(new Error('Drive ' + res.status), { status: res.status });
+  return res.blob();
+}
+
+// Il file su Drive non contiene i byte delle foto (sono già su Drive come JPEG) né il registro di debug.
+function wineToSync(w) {
+  const { log, ...rest } = w;
+  return {
+    ...rest,
+    photos: (w.photos || []).map(({ bytes, thumbBytes, cropBytes, blob, thumb, ...p }) => p),
+    ...(w.web && { web: { ...w.web, sources: (w.web.sources || []).map(({ title, uri }) => ({ title, uri })) } }),
+  };
+}
+
+// Vino arrivato da Drive: si tengono le foto già presenti qui e il registro locale.
+function wineFromSync(r, local) {
+  const photos = (r.photos || []).map((p) => {
+    const lp = local?.photos?.find((x) => x.id === p.id);
+    if (lp && hasBytes(lp)) return { ...p, driveId: p.driveId || lp.driveId, bytes: lp.bytes, thumbBytes: lp.thumbBytes, cropBytes: lp.cropBytes };
+    return { ...p, bytes: null, thumbBytes: null };
+  });
+  return { ...r, photos, log: local?.log || [] };
+}
+
+const byId = (list) => [...list].sort((a, b) => (a.id < b.id ? -1 : 1));
+
+// Unisce una lista locale con quella di Drive. Le scritture passano dalla coda, così non si sovrappongono a una modifica in corso.
+async function mergeList(kind, remoteList, deleted, { all, get, put, remove, fromSync }) {
+  let changed = false;
+  const job = writeQueue.then(async () => {
+    for (const r of remoteList) {
+      if ((deleted[r.id] || 0) >= (r.updatedAt || 0)) continue;
+      const l = await get(r.id);
+      if (l && (l.updatedAt || 0) >= (r.updatedAt || 0)) continue;
+      await put(fromSync(r, l));
+      changed = true;
+    }
+    for (const l of await all()) {
+      if (deleted[l.id] && deleted[l.id] >= (l.updatedAt || 0)) { await remove(l.id); changed = true; }
+    }
+  });
+  writeQueue = job.catch(() => {});
+  await job;
+  return changed;
+}
+
+async function runSync() {
+  const folder = await driveFolderId();
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem('cantina.syncFile') || 'null'); } catch {}
+  let fileId = cached?.folder === folder ? cached.id : await driveFindFile(SYNC_FILE, folder);
+  let remote = null;
+  if (fileId) {
+    try {
+      remote = await (await driveBlob(fileId)).text().then(JSON.parse);
+    } catch (e) {
+      if (e.status !== 404) throw e;
+      fileId = await driveFindFile(SYNC_FILE, folder);
+      remote = fileId ? JSON.parse(await (await driveBlob(fileId)).text()) : null;
+    }
+  }
+  remote ||= { wines: [], drinks: [], deleted: {} };
+
+  // Eliminazioni: vale la più recente tra le due copie.
+  const local = tombstones();
+  const del = { wines: { ...local.wines }, drinks: { ...local.drinks } };
+  for (const kind of ['wines', 'drinks']) {
+    for (const [id, t] of Object.entries(remote.deleted?.[kind] || {})) del[kind][id] = Math.max(del[kind][id] || 0, t);
+  }
+  saveTombstones(del);
+
+  const changedWines = await mergeList('wines', remote.wines || [], del.wines, {
+    all: allWines, get: getWine, put: rawPutWine, remove: rawDeleteWine, fromSync: wineFromSync,
+  });
+  const changedDrinks = await mergeList('drinks', remote.drinks || [], del.drinks, {
+    all: allDrinks, get: (id) => store('readonly', (s) => s.get(id), DRINKS), put: rawPutDrink, remove: rawDeleteDrink, fromSync: (r) => r,
+  });
+  if (changedWines || changedDrinks) scheduleRender();
+
+  // Si riscrive il file solo se la copia unita è diversa da quella su Drive.
+  const out = {
+    app: 'cantina',
+    formato: 1,
+    wines: byId((await allWines()).map(wineToSync)),
+    drinks: byId(await allDrinks()),
+    deleted: del,
+  };
+  const same = JSON.stringify(out) === JSON.stringify({ app: 'cantina', formato: 1, wines: byId(remote.wines || []), drinks: byId(remote.drinks || []), deleted: remote.deleted || {} });
+  if (!same) fileId = await driveWriteJson(fileId, SYNC_FILE, folder, { ...out, salvato: new Date().toISOString(), versione: APP_VERSION });
+  localStorage.setItem('cantina.syncFile', JSON.stringify({ folder, id: fileId }));
+
+  await syncSettings().catch((e) => diag(`Impostazioni su Drive non sincronizzate: ${e.message}`, false));
+  downloadPhotos();
+}
+
+// Chiavi e modelli: vale l'ultima versione salvata da uno qualsiasi dei tuoi dispositivi,
+// ma un valore vuoto non cancella mai una chiave già inserita altrove (un PC nuovo non ha ancora niente).
+async function syncSettings() {
+  let fileId = localStorage.getItem('cantina.settingsFile') || await driveFindFile(SETTINGS_FILE, null);
+  let remote = null;
+  if (fileId) {
+    try { remote = JSON.parse(await (await driveBlob(fileId)).text()); } catch (e) { if (e.status === 404) fileId = null; else throw e; }
+  }
+  const rv = remote?.values || {};
+  const rAt = remote?.savedAt || 0;
+  let mine = Number(settings.settingsSavedAt) || 0;
+  if (rAt > mine) {
+    saveSettings({ ...Object.fromEntries(SYNCED_SETTINGS.filter((k) => rv[k]).map((k) => [k, rv[k]])), settingsSavedAt: rAt });
+    mine = rAt;
+  }
+  const need = remote
+    ? mine > rAt || SYNCED_SETTINGS.some((k) => settings[k] && settings[k] !== rv[k])
+    : !!(settings.geminiKey || settings.tavilyKey);
+  if (need) {
+    const savedAt = Math.max(mine, rAt + 1);
+    saveSettings({ settingsSavedAt: savedAt });
+    fileId = await driveWriteJson(fileId, SETTINGS_FILE, null, { savedAt, values: Object.fromEntries(SYNCED_SETTINGS.map((k) => [k, settings[k]])) });
+  }
+  if (fileId) localStorage.setItem('cantina.settingsFile', fileId);
+}
+
+// Scarica le foto dei vini aggiunti su un altro dispositivo, rifacendo miniatura e ritaglio.
+const photoTried = new Set();
+let downloading = false;
+async function downloadPhotos() {
+  if (downloading || !driveToken()) return;
+  downloading = true;
+  try {
+    for (const w of await allWines()) {
+      for (const p of w.photos || []) {
+        if (hasBytes(p) || p.lost || !p.driveId || photoTried.has(p.id)) continue;
+        photoTried.add(p.id);
+        try {
+          const blob = await driveBlob(p.driveId);
+          const img = await loadImage(blob);
+          const bytes = await blob.arrayBuffer();
+          const thumbBytes = await (await resize(img, 320, 0.75)).arrayBuffer();
+          const cropBytes = p.box ? await cropToBox(blob, p.box).catch(() => null) : null;
+          const job = writeQueue.then(async () => {
+            const cur = await getWine(w.id);
+            if (!cur) return;
+            await rawPutWine({ ...cur, photos: cur.photos.map((x) => (x.id === p.id ? { ...x, bytes, thumbBytes, ...(cropBytes && { cropBytes }) } : x)) });
+          });
+          writeQueue = job.catch(() => {});
+          await job;
+          scheduleRender();
+        } catch (e) {
+          diag(`Foto ${p.driveId} non scaricata da Drive: ${e.message}`, false);
+        }
+      }
+    }
+  } finally {
+    downloading = false;
   }
 }
 
@@ -939,7 +1196,7 @@ async function recognize(id) {
     let current = wine;
     if (wine.status !== 'details') {
       enter('quick');
-      const { campi_incerti, e_un_vino, riquadro_bottiglia, ...quick } = await geminiQuick(wine.photos.filter((p) => !p.lost).map(photoBlob), hooks);
+      const { campi_incerti, e_un_vino, riquadro_bottiglia, ...quick } = await geminiQuick(wine.photos.filter((p) => !p.lost && hasBytes(p)).map(photoBlob), hooks);
       const fromLabel = LABEL.map((f) => f.k).filter((k) => {
         const v = quick[k];
         if (v == null || v === '' || (Array.isArray(v) && !v.length)) { delete quick[k]; return false; }
@@ -1031,7 +1288,7 @@ async function processWine(id) {
     const wine = await getWine(id);
     await Promise.all([
       uploadPhotos(id),
-      wine.status === 'ok' ? null : recognize(id),
+      wine.status === 'ok' || !wine.photos.some(hasBytes) ? null : recognize(id),
     ]);
   } finally {
     running.delete(id);
@@ -1062,7 +1319,7 @@ async function addPhotosToWine(id, files) {
 async function processPending() {
   const wines = await allWines();
   for (const w of wines) {
-    if (w.status !== 'ok' || w.photos.some((p) => !p.driveId)) processWine(w.id);
+    if (w.status !== 'ok' || w.photos.some((p) => !p.driveId && hasBytes(p))) processWine(w.id);
   }
 }
 
@@ -1264,7 +1521,9 @@ function releaseUrls(group) {
 }
 const imgTag = (p, getBlob, group) => p.lost
   ? '<span class="lost">Foto non recuperabile</span>'
-  : `<img src="${blobUrl(getBlob(p), group)}" alt="">`;
+  : !hasBytes(p)
+    ? '<span class="lost">Foto in arrivo da Drive</span>'
+    : `<img src="${blobUrl(getBlob(p), group)}" alt="">`;
 
 function toast(msg, onClick) {
   const el = document.createElement('div');
@@ -1365,7 +1624,7 @@ function wineBadges(w) {
   if (w.status === 'new' && !settings.geminiKey) b.push('Da riconoscere');
   if (w.status === 'error') b.push('Errore Gemini');
   if (w.notWine) b.push('Non sembra un vino');
-  if (w.photos.some((p) => !p.driveId)) b.push('Drive in attesa');
+  if (w.photos.some((p) => !p.driveId && hasBytes(p))) b.push('Drive in attesa');
   return b;
 }
 
@@ -1530,9 +1789,9 @@ async function render() {
   $('#btn-finished').hidden = q || !finished.length;
   $('#btn-finished').textContent = showFinished ? 'Nascondi i vini finiti' : `Mostra i vini finiti (${finished.length})`;
 
-  const pending = wines.filter((w) => w.status !== 'ok' || w.photos.some((p) => !p.driveId));
+  const pending = wines.filter((w) => w.status !== 'ok' || w.photos.some((p) => !p.driveId && hasBytes(p)));
   $('#pending-section').hidden = pending.length === 0;
-  const noDrive = wines.reduce((n, w) => n + w.photos.filter((p) => !p.driveId).length, 0);
+  const noDrive = wines.reduce((n, w) => n + w.photos.filter((p) => !p.driveId && hasBytes(p)).length, 0);
   const noAi = wines.filter((w) => w.status !== 'ok').length;
   $('#pending-hint').textContent = [
     noDrive ? `${noDrive} foto da caricare su Drive` : '',
@@ -2441,6 +2700,7 @@ function bindUi() {
   });
   $('#btn-login').addEventListener('click', login);
   $('#btn-logout').addEventListener('click', () => { logout(); toast('Disconnesso da Drive'); });
+  $('#btn-sync').addEventListener('click', () => (driveToken() ? syncNow() : login()));
   $('#btn-settings').addEventListener('click', openSettings);
   $('#btn-export').addEventListener('click', exportJson);
   $('#btn-retry').addEventListener('click', () => {
@@ -2453,7 +2713,11 @@ function bindUi() {
     if ($('#dlg-settings').returnValue !== 'save') return;
     const form = $('#settings-form');
     const prevFolder = settings.driveFolder;
-    saveSettings(Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map((k) => [k, form.elements[k].value.trim()])));
+    const next = Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map((k) => [k, form.elements[k].value.trim()]));
+    // Se chiavi o modelli cambiano, la nuova versione va anche sugli altri dispositivi.
+    if (SYNCED_SETTINGS.some((k) => next[k] !== settings[k])) next.settingsSavedAt = Date.now();
+    saveSettings(next);
+    syncSoon(500);
     if (prevFolder !== settings.driveFolder) folderPromise = null;
     processPending();
     scheduleRender();
@@ -2505,7 +2769,7 @@ const BUILD = (document.querySelector('meta[name="app-version"]') || {}).content
 
 /** Mai ricaricare durante un riconoscimento o con una scheda aperta. */
 function busyNow() {
-  return running.size > 0 || swiping || ['#dlg-wine', '#dlg-settings', '#dlg-drink', '#dlg-group'].some((s) => $(s).open);
+  return running.size > 0 || swiping || !!sync.running || ['#dlg-wine', '#dlg-settings', '#dlg-drink', '#dlg-group'].some((s) => $(s).open);
 }
 
 async function checkForUpdate() {
@@ -2550,6 +2814,10 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pageshow', (e) => e.persisted && checkForUpdate());
 updateDriveStatus();
 if (driveToken()) driveFolderId().catch(() => {});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') syncSoon(300);
+});
+setInterval(() => document.visibilityState === 'visible' && syncSoon(0), 120_000);
 registerServiceWorker();
 navigator.storage?.persist?.();
-migratePhotos().catch(() => {}).then(() => migrateDrinks().catch(() => {})).then(render).then(processPending);
+migratePhotos().catch(() => {}).then(() => migrateDrinks().catch(() => {})).then(render).then(() => syncNow()).then(processPending);

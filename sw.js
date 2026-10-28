@@ -1,7 +1,7 @@
 // Come nell'app Palestrina: i file dell'app sono sempre verificati sul server (no-cache),
 // così dopo un aggiornamento non si mescolano file vecchi della cache di Safari con file nuovi.
 // In più qui resta una copia in cache, usata solo offline (in cantina spesso non c'è campo).
-const CACHE = 'cantina-v24';
+const CACHE = 'cantina-v25';
 const SHELL = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-180.png', 'icon-512.png'];
 
 self.addEventListener('install', (event) => {

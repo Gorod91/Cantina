@@ -99,7 +99,7 @@
     </section>
   </main>
 
-  <footer><button type="button" id="btn-notes" class="link">v<span id="app-version"></span> · Note di rilascio</button></footer>
+  <footer><p id="sync-status"></p><button type="button" id="btn-notes" class="link">v<span id="app-version"></span> · Note di rilascio</button></footer>
 
   <nav class="tabbar">
     <div class="brand">Cantina</div>
@@ -276,7 +276,8 @@
       <label>Cartella su Drive
         <input name="driveFolder" placeholder="Cantina">
       </label>
-      <p class="hint">Chiavi e dati restano solo su questo dispositivo.</p>
+      <p class="hint">Con Drive collegato, vini, diario, chiavi e modelli si sincronizzano tra i tuoi dispositivi (telefono, PC). La cartella su Drive contiene cantina.json e le foto; le chiavi stanno in un file a parte, cantina-impostazioni.json.</p>
+      <button type="button" id="btn-sync">Sincronizza ora</button>
       <div class="actions">
         <button type="button" id="btn-export">Esporta JSON</button>
         <button type="button" id="btn-logout">Esci da Drive</button>

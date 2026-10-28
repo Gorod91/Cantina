@@ -562,3 +562,5 @@ body.dropping #drop-hint {
   #select-bar { left: var(--side); }
   .toast { left: calc(var(--side) + 24px); right: auto; max-width: 480px; bottom: 24px; }
 }
+#sync-status { margin: 0 0 4px; }
+#sync-status.err { color: var(--danger); }
