@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.1.1';
+const APP_VERSION = '0.1.2';
 
 // ---------- Impostazioni ----------
 
@@ -318,7 +318,9 @@ const FIELDS = [
   { k: 'nome', l: 'Nome del vino' },
   { k: 'denominazione', l: 'Denominazione' },
   { k: 'classificazione', l: 'Classificazione (DOCG, DOC, IGT…)' },
-  { k: 'tipologia', l: 'Tipologia' },
+  { k: 'colore', l: 'Colore', options: ['rosso', 'bianco', 'rosato', 'orange'] },
+  { k: 'stile', l: 'Stile', options: ['fermo', 'frizzante', 'spumante metodo classico', 'spumante metodo Martinotti/Charmat', 'rifermentato in bottiglia / col fondo', 'passito', 'vendemmia tardiva', 'muffato', 'liquoroso/fortificato'] },
+  { k: 'caratteristiche', l: 'Caratteristiche (biologico, naturale…)', type: 'ARRAY' },
   { k: 'annata', l: 'Annata', type: 'INTEGER' },
   { k: 'vitigni', l: 'Vitigni', type: 'ARRAY' },
   { k: 'regione', l: 'Regione' },
@@ -332,10 +334,14 @@ const FIELDS = [
   { k: 'descrizione', l: 'Descrizione' },
 ];
 
+const OPTIONS = Object.fromEntries(FIELDS.filter((f) => f.options).map((f) => [f.k, f.options]));
+
 const PROMPT = `Sei un sommelier esperto. Le immagini mostrano l'etichetta (ed eventualmente la retroetichetta) di UNA bottiglia di vino.
 Estrai più informazioni possibili. Usa prima ciò che è scritto sull'etichetta; per i campi non scritti (vitigni, regione, temperatura di servizio, finestra di consumo, abbinamenti, descrizione) puoi usare la tua conoscenza del vino, ma solo se lo hai identificato con ragionevole sicurezza.
 Se un dato non è ricavabile lascialo null. Non inventare l'annata: se non è visibile è null.
-Tipologia: una tra rosso, bianco, rosato, spumante, dolce, fortificato.
+Colore: "orange" per i bianchi macerati sulle bucce (anche se l'etichetta dice "macerato", "ramato", "amber" o "skin contact"); il ramato di Pinot grigio è orange se macerato, altrimenti rosato.
+Stile: scegli il più specifico; un Prosecco col fondo è "rifermentato in bottiglia / col fondo", un Franciacorta è "spumante metodo classico", un Marsala o un Porto è "liquoroso/fortificato".
+Caratteristiche: solo se indicate o certe, per esempio biologico, biodinamico, naturale, senza solfiti aggiunti, non filtrato, vegano, dosaggio (brut nature, extra brut, brut, extra dry, dry, demi-sec, dolce), residuo zuccherino (secco, abboccato, amabile, dolce).
 In "campi_incerti" elenca le chiavi dei campi dedotti o poco leggibili. Rispondi in italiano.`;
 
 function geminiSchema() {
@@ -343,7 +349,7 @@ function geminiSchema() {
   for (const f of FIELDS) {
     props[f.k] = f.type === 'ARRAY'
       ? { type: 'ARRAY', items: { type: 'STRING' }, nullable: true }
-      : { type: f.type || 'STRING', nullable: true };
+      : { type: f.type || 'STRING', nullable: true, ...(f.options && { enum: f.options }) };
   }
   props.campi_incerti = { type: 'ARRAY', items: { type: 'STRING' } };
   props.e_un_vino = { type: 'BOOLEAN' };
@@ -486,7 +492,7 @@ function wineTitle(w) {
 
 function wineSubtitle(w) {
   const d = w.data || {};
-  return [d.denominazione, d.annata, d.tipologia].filter(Boolean).join(' · ');
+  return [d.denominazione, d.annata, d.colore || d.tipologia, d.stile !== 'fermo' && d.stile].filter(Boolean).join(' · ');
 }
 
 function wineBadges(w) {
@@ -554,7 +560,8 @@ async function openWine(id) {
     <label class="${uncertain.has(k) ? 'uncertain' : ''}">${esc(l)}
       ${k === 'descrizione' || k === 'abbinamenti'
         ? `<textarea name="${k}" rows="2">${esc(v)}</textarea>`
-        : `<input name="${k}" value="${esc(v)}" ${type ? `inputmode="${type}"` : ''}>`}
+        : `<input name="${k}" value="${esc(v)}" ${type ? `inputmode="${type}"` : ''} ${OPTIONS[k] ? `list="opt-${k}"` : ''}>`}
+      ${OPTIONS[k] ? `<datalist id="opt-${k}">${OPTIONS[k].map((o) => `<option value="${esc(o)}">`).join('')}</datalist>` : ''}
     </label>`;
   $('#wine-fields').innerHTML =
     `<div class="grid2">${input('quantita', 'Bottiglie', w.quantita, 'numeric')}${input('posizione', 'Posizione in cantina', w.posizione)}</div>` +
