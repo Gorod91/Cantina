@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.1';
+const APP_VERSION = '0.2.2';
 
 // ---------- Impostazioni ----------
 
@@ -723,7 +723,130 @@ async function exportJson() {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+// ---------- Visore foto ----------
+
+// La pagina non si può ingrandire; le foto della scheda si aprono a tutto schermo con zoom a due dita,
+// trascinamento e doppio tocco, gestiti qui con i pointer events.
+const viewer = { urls: [], index: 0, scale: 1, x: 0, y: 0, pointers: new Map(), start: null, lastTap: 0 };
+
+function viewerApply(animate) {
+  const img = $('#viewer-img');
+  img.style.transition = animate ? 'transform 0.2s' : 'none';
+  img.style.transform = `translate(${viewer.x}px, ${viewer.y}px) scale(${viewer.scale})`;
+}
+
+function viewerShow(index) {
+  viewer.index = (index + viewer.urls.length) % viewer.urls.length;
+  Object.assign(viewer, { scale: 1, x: 0, y: 0 });
+  $('#viewer-img').src = viewer.urls[viewer.index];
+  viewerApply(false);
+  const many = viewer.urls.length > 1;
+  $('#viewer-prev').hidden = !many;
+  $('#viewer-next').hidden = !many;
+}
+
+function openViewer(urls, index) {
+  viewer.urls = urls;
+  viewerShow(index);
+  $('#dlg-photo').showModal();
+}
+
+function bindViewer() {
+  const area = $('#viewer');
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const center = () => {
+    const r = area.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+  // Zoom attorno a un punto dello schermo, tenendo fermo quel punto sotto le dita.
+  const zoomAt = (scale, p, base) => {
+    const c = center();
+    const s = Math.min(6, Math.max(1, scale));
+    const k = s / base.scale;
+    viewer.x = (p.x - c.x) - k * (p.x - c.x - base.x);
+    viewer.y = (p.y - c.y) - k * (p.y - c.y - base.y);
+    viewer.scale = s;
+    if (s === 1) { viewer.x = 0; viewer.y = 0; }
+  };
+  const snapshot = () => {
+    const pts = [...viewer.pointers.values()];
+    viewer.start = { pts, scale: viewer.scale, x: viewer.x, y: viewer.y };
+  };
+
+  area.addEventListener('pointerdown', (e) => {
+    area.setPointerCapture(e.pointerId);
+    viewer.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    snapshot();
+  });
+  area.addEventListener('pointermove', (e) => {
+    if (!viewer.pointers.has(e.pointerId)) return;
+    viewer.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const pts = [...viewer.pointers.values()];
+    const st = viewer.start;
+    if (pts.length >= 2 && st.pts.length >= 2) {
+      const m = mid(pts[0], pts[1]);
+      const m0 = mid(st.pts[0], st.pts[1]);
+      zoomAt(st.scale * (dist(pts[0], pts[1]) / dist(st.pts[0], st.pts[1])), m0, st);
+      viewer.x += m.x - m0.x;
+      viewer.y += m.y - m0.y;
+    } else if (pts.length === 1 && viewer.scale > 1) {
+      viewer.x = st.x + pts[0].x - st.pts[0].x;
+      viewer.y = st.y + pts[0].y - st.pts[0].y;
+    }
+    viewerApply(false);
+  });
+  const end = (e) => {
+    if (!viewer.pointers.has(e.pointerId)) return;
+    const st = viewer.start;
+    const p = viewer.pointers.get(e.pointerId);
+    viewer.pointers.delete(e.pointerId);
+    if (viewer.pointers.size === 0 && st.pts.length === 1) {
+      const dx = p.x - st.pts[0].x;
+      const moved = Math.hypot(dx, p.y - st.pts[0].y);
+      if (moved < 10) {
+        // Doppio tocco: ingrandisce dove si tocca, o torna alla foto intera.
+        if (Date.now() - viewer.lastTap < 300) {
+          if (viewer.scale > 1) Object.assign(viewer, { scale: 1, x: 0, y: 0 });
+          else zoomAt(2.5, p, { scale: 1, x: 0, y: 0 });
+          viewerApply(true);
+          viewer.lastTap = 0;
+        } else {
+          viewer.lastTap = Date.now();
+        }
+      } else if (viewer.scale === 1 && Math.abs(dx) > 60 && viewer.urls.length > 1) {
+        viewerShow(viewer.index + (dx < 0 ? 1 : -1));
+      }
+    }
+    if (viewer.scale < 1.05) { Object.assign(viewer, { scale: 1, x: 0, y: 0 }); viewerApply(true); }
+    snapshot();
+  };
+  area.addEventListener('pointerup', end);
+  area.addEventListener('pointercancel', end);
+  $('#viewer-close').addEventListener('click', () => $('#dlg-photo').close());
+  $('#viewer-prev').addEventListener('click', () => viewerShow(viewer.index - 1));
+  $('#viewer-next').addEventListener('click', () => viewerShow(viewer.index + 1));
+  $('#wine-photos').addEventListener('click', (e) => {
+    const img = e.target.closest('img');
+    if (!img) return;
+    const imgs = [...$('#wine-photos').querySelectorAll('img')];
+    openViewer(imgs.map((i) => i.src), imgs.indexOf(img));
+  });
+}
+
+// Safari su iOS ignora user-scalable=no: si bloccano a mano pizzico e doppio tocco sulla pagina.
+function blockPageZoom() {
+  for (const ev of ['gesturestart', 'gesturechange']) {
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+  }
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1) e.preventDefault();
+  }, { passive: false });
+}
+
 function bindUi() {
+  bindViewer();
+  blockPageZoom();
   $('#app-version').textContent = APP_VERSION + (BUILD === 'dev' ? '' : ` (${BUILD})`);
   for (const sel of ['#in-camera', '#in-files']) {
     $(sel).addEventListener('change', (e) => {

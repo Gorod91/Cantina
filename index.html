@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <!-- Versione pubblicata: la scrive GitHub Actions (vedi pages.yml), insieme a version.json -->
   <meta name="app-version" content="dev">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#6b1d2a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Cantina">
@@ -99,6 +99,13 @@
         <button value="save" class="primary">Salva</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="dlg-photo">
+    <div id="viewer"><img id="viewer-img" alt=""></div>
+    <button type="button" id="viewer-close" aria-label="Chiudi">×</button>
+    <button type="button" id="viewer-prev" class="viewer-nav" aria-label="Foto precedente">‹</button>
+    <button type="button" id="viewer-next" class="viewer-nav" aria-label="Foto successiva">›</button>
   </dialog>
 
   <script src="app.js"></script>
