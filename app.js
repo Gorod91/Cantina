@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.6.1';
+const APP_VERSION = '0.6.2';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.6.2', notes: ['Spumanti: bollicine che salgono sopra il calice, così si distinguono dai bianchi fermi.'] },
   { v: '0.6.1', notes: ['Spumanti: calice a tulipano con le bollicine al posto della flûte.'] },
   { v: '0.6.0', notes: [
     'Il colore del vino è un calice colorato (a tulipano con le bollicine per gli spumanti) invece della scritta.',
@@ -1126,7 +1127,7 @@ function colorIcon(d, size = 'sm') {
   const c = COLOR_NAMES[d?.colore] ? d.colore : 'ignoto';
   const title = [COLOR_NAMES[d?.colore] || 'Colore non indicato', isBubbly(d) && 'con bollicine'].filter(Boolean).join(', ');
   const shape = isBubbly(d)
-    ? '<path class="wine" d="M8.2 6.5h7.6c0 2.9-.4 5.1-1.5 6.4a2.9 2.9 0 0 1-4.6 0c-1.1-1.3-1.5-3.5-1.5-6.4z"/><path class="glass" d="M8 3h8c.5 4.3.2 8.1-1.3 10.1a3.4 3.4 0 0 1-5.4 0C7.8 11.1 7.5 7.3 8 3zM12 14.3V20M8.5 21h7"/><circle class="bub" cx="11" cy="9" r=".75"/><circle class="bub" cx="13" cy="10.6" r=".65"/><circle class="bub" cx="12.2" cy="7.6" r=".55"/>'
+    ? '<path class="wine" d="M8.3 10h7.4c0 2.4-.4 4.2-1.4 5.3a2.9 2.9 0 0 1-4.6 0c-1-1.1-1.4-2.9-1.4-5.3z"/><path class="glass" d="M8 7h8c.4 3.6.1 6.7-1.3 8.4a3.4 3.4 0 0 1-5.4 0C7.9 13.7 7.6 10.6 8 7zM12 16.6V21M8.8 21.6h6.4"/><circle class="fizz" cx="10.3" cy="4.6" r="1.15"/><circle class="fizz" cx="13.9" cy="3.2" r="1.45"/><circle class="fizz" cx="12" cy="0.9" r=".8"/><circle class="bub" cx="11" cy="12.3" r=".8"/><circle class="bub" cx="13" cy="11.2" r=".7"/>'
     : '<path class="wine" d="M7.5 8.5h9c-.4 3.8-2.2 6-4.5 6s-4.1-2.2-4.5-6z"/><path class="glass" d="M7 3h10c0 7-2 11.7-5 11.7S7 10 7 3zM12 14.7V20M8.5 21h7"/>';
   return `<svg class="cicon ${size} c-${c}" viewBox="0 0 24 24" role="img" aria-label="${esc(title)}"><title>${esc(title)}</title>${shape}</svg>`;
 }

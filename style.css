@@ -379,7 +379,8 @@ dialog.sheet.with-bar::before { display: none; }
 .cicon { width: 19px; height: 19px; flex: none; vertical-align: -3px; margin-right: 5px; }
 .cicon .glass { fill: none; stroke: #8d8183; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .cicon .wine { stroke: none; }
-.cicon .bub { fill: rgba(255, 255, 255, 0.75); }
+.cicon .bub { fill: rgba(255, 255, 255, 0.85); }
+.cicon .fizz { fill: none; stroke: #f2e9ea; stroke-width: 1.1; }
 .c-rosso .wine { fill: #b8344c; }
 .c-bianco .wine { fill: #e3cd73; }
 .c-rosato .wine { fill: #ee9aa6; }
