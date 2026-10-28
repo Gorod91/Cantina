@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.5.1';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.5.1', notes: ['Il tasto fotocamera ora fa scegliere tra scattare una foto e prenderle dalla libreria (anche più di una).'] },
   { v: '0.5.0', notes: ['Grafica rifatta da zero come nei prototipi, sempre scura.', 'Scheda del vino nuova: foto grande, quando berlo con la linea di oggi, bottiglie con − e +, prezzo e bevute. I dati da modificare sono in fondo, sotto "Modifica i dati del vino".'] },
   { v: '0.4.4', notes: ['Corretto: con un valore della cantina sopra i 100 € con i centesimi la lista restava vuota e le foto nuove non comparivano.'] },
   { v: '0.4.3', notes: ['Se il database del telefono non risponde o c\'è un errore, compare un riquadro con i dettagli da copiare.'] },
@@ -1716,15 +1717,11 @@ function bindUi() {
   $('#app-version').textContent = APP_VERSION + (BUILD === 'dev' ? '' : ` (${BUILD})`);
   $('#btn-notes').addEventListener('click', showReleaseNotes);
   announceUpdate();
-  $('#in-camera').addEventListener('change', (e) => {
-    const files = [...e.target.files];
-    e.target.value = '';
-    addFiles(files, false);
-  });
-  // Più foto importate insieme: si chiede se sono fronte e retro dello stesso vino.
+  // Il tasto fotocamera non forza la fotocamera: iOS propone Scatta foto, Libreria foto o Scegli file.
+  // Più foto scelte insieme: si chiede se sono fronte e retro dello stesso vino.
   let importing = [];
   $('#btn-import').addEventListener('click', () => $('#in-files').click());
-  $('#in-files').addEventListener('change', (e) => {
+  for (const sel of ['#in-camera', '#in-files']) $(sel).addEventListener('change', (e) => {
     importing = [...e.target.files];
     e.target.value = '';
     if (importing.length < 2) return addFiles(importing, false);
