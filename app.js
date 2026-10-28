@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.7.2';
+const APP_VERSION = '0.7.3';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.7.3', notes: ['Eliminare più vini: "Seleziona" sopra la lista, tocca i vini e poi Elimina. Nella scheda del vino il pulsante Elimina è in vista, non più dentro Modifica.'] },
   { v: '0.7.2', notes: ['Scheda del vino: se ha più foto (fronte e retro) si vedono tutte in alto, affiancate.'] },
   { v: '0.7.1', notes: ['Raggruppa le foto: niente più proposta automatica di Gemini, le foto dello stesso vino si mettono insieme a mano con un tocco.'] },
   { v: '0.7.0', notes: [
@@ -1434,9 +1435,10 @@ async function render() {
     const p = paidOrEstimate(w);
     const price = p ? `${Number(w.prezzo_pagato) > 0 ? '' : '~'}${formatPrice(p)}` : '';
     return `
-    <li data-id="${w.id}" class="${Number(w.quantita) > 0 ? '' : 'finished'}">
+    <li data-id="${w.id}" class="${Number(w.quantita) > 0 ? '' : 'finished'}${selection.ids.has(w.id) ? ' sel' : ''}">
       <div class="row-under">Bevuta</div>
       <div class="row">
+        <span class="tick" aria-hidden="true"></span>
         ${w.photos?.[0] ? imgTag(w.photos[0], thumbBlob, 'list') : `<span class="dot ${esc(w.data?.colore || '')}"></span>`}
         <div class="meta">
           <strong>${colorIcon(w.data)}${esc(listTitle(w))}</strong>
@@ -1527,7 +1529,7 @@ function bindSwipe() {
 
   list.addEventListener('pointerdown', (e) => {
     const li = e.target.closest('li[data-id]');
-    if (!li || li.classList.contains('finished') || e.button > 0) return;
+    if (!li || li.classList.contains('finished') || e.button > 0 || selection.on) return;
     row = li.querySelector('.row');
     x0 = e.clientX;
     y0 = e.clientY;
@@ -1568,7 +1570,60 @@ function bindSwipe() {
   list.addEventListener('click', (e) => {
     if (moved) { moved = false; return; }
     const li = e.target.closest('li[data-id]');
-    if (li) openWine(li.dataset.id);
+    if (!li) return;
+    if (selection.on) toggleSelected(li);
+    else openWine(li.dataset.id);
+  });
+}
+
+// ---------- Selezione ed eliminazione di più vini ----------
+
+const selection = { on: false, ids: new Set() };
+
+function setSelecting(on) {
+  selection.on = on;
+  selection.ids.clear();
+  document.body.classList.toggle('selecting', on);
+  $('#select-bar').hidden = !on;
+  $('#btn-select').textContent = on ? 'Fine' : 'Seleziona';
+  document.querySelectorAll('#wine-list li.sel').forEach((li) => li.classList.remove('sel'));
+  updateSelectBar();
+}
+
+function toggleSelected(li) {
+  const id = li.dataset.id;
+  if (selection.ids.has(id)) selection.ids.delete(id);
+  else selection.ids.add(id);
+  li.classList.toggle('sel', selection.ids.has(id));
+  updateSelectBar();
+}
+
+function updateSelectBar() {
+  const n = selection.ids.size;
+  $('#select-count').textContent = n ? `${n} ${n === 1 ? 'selezionato' : 'selezionati'}` : 'Tocca i vini da eliminare';
+  $('#btn-select-delete').disabled = !n;
+  $('#btn-select-delete').textContent = n ? `Elimina ${n}` : 'Elimina';
+}
+
+function bindSelection() {
+  $('#btn-select').addEventListener('click', () => setSelecting(!selection.on));
+  $('#btn-select-cancel').addEventListener('click', () => setSelecting(false));
+  $('#btn-select-all').addEventListener('click', () => {
+    const lis = [...document.querySelectorAll('#wine-list li[data-id]')];
+    const all = lis.every((li) => selection.ids.has(li.dataset.id));
+    lis.forEach((li) => {
+      if (all) selection.ids.delete(li.dataset.id); else selection.ids.add(li.dataset.id);
+      li.classList.toggle('sel', !all);
+    });
+    updateSelectBar();
+  });
+  $('#btn-select-delete').addEventListener('click', async () => {
+    const ids = [...selection.ids];
+    if (!ids.length || !confirm(`Eliminare ${ids.length === 1 ? 'questo vino' : `questi ${ids.length} vini`} dall'app? Le foto su Drive restano.`)) return;
+    for (const id of ids) await deleteWine(id);
+    setSelecting(false);
+    scheduleRender();
+    toast(ids.length === 1 ? 'Vino eliminato.' : `${ids.length} vini eliminati.`);
   });
 }
 
@@ -2130,6 +2185,7 @@ function bindUi() {
     else startGrouping(files);
   });
   bindGrouping();
+  bindSelection();
   $('#btn-merge').addEventListener('click', async () => {
     const id = editingId;
     const twin = $('#btn-merge').dataset.twin;

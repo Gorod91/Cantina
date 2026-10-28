@@ -67,7 +67,10 @@
             <option value="colore">colore</option>
           </select>
         </label>
-        <button type="button" id="btn-import" class="link">Importa foto</button>
+        <span class="sort-acts">
+          <button type="button" id="btn-select" class="link">Seleziona</button>
+          <button type="button" id="btn-import" class="link">Importa foto</button>
+        </span>
       </div>
       <ul id="wine-list"></ul>
       <button type="button" id="btn-finished" class="link" hidden></button>
@@ -116,6 +119,12 @@
     </button>
   </nav>
   <input id="in-files" type="file" accept="image/*" multiple hidden>
+  <div id="select-bar" hidden>
+    <span id="select-count">Tocca i vini da eliminare</span>
+    <button type="button" id="btn-select-all" class="link">Tutti</button>
+    <button type="button" id="btn-select-cancel">Fine</button>
+    <button type="button" id="btn-select-delete" class="primary" disabled>Elimina</button>
+  </div>
 
   <dialog id="dlg-group" class="sheet">
     <form method="dialog">
@@ -217,6 +226,7 @@
       <div class="box" id="wine-about"></div>
       <div class="box" id="wine-table"></div>
       <div class="box" id="wine-drinks"></div>
+      <button type="button" id="btn-delete" class="danger wide">Elimina questo vino</button>
       <details class="edit" id="wine-edit">
         <summary>Modifica i dati del vino</summary>
         <div id="wine-state" class="hint"></div>
@@ -225,7 +235,6 @@
           <button type="button" id="btn-google">Cerca su Google</button>
           <button type="button" id="btn-rerun">Riconosci di nuovo</button>
           <button type="button" id="btn-crop">Ritaglia sulla bottiglia</button>
-          <button type="button" id="btn-delete" class="danger">Elimina vino</button>
         </div>
         <details id="wine-debug" class="debug"><summary>Registro (debug)</summary><button type="button" id="btn-copy-log" class="small">Copia registro</button><div id="wine-log"></div></details>
       </details>

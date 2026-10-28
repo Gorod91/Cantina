@@ -460,3 +460,22 @@ dialog.sheet.with-bar::before { display: none; }
 .hero.two img, .hero.two .lost { flex: 1 1 0; min-width: 0; height: 240px; }
 .hero.many img, .hero.many .lost { width: 40%; height: 220px; }
 .hero.two, .hero.many { justify-content: flex-start; }
+
+/* Selezione di più vini da eliminare */
+.sort-acts { display: flex; gap: 14px; }
+#wine-list .tick { display: none; flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--muted); }
+body.selecting #wine-list .tick { display: block; }
+body.selecting #wine-list .row-under { display: none; }
+#wine-list li.sel .row { background: var(--wine-soft); }
+#wine-list li.sel .tick { background: var(--wine); border-color: var(--wine); box-shadow: inset 0 0 0 3px var(--wine-soft); }
+#select-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px max(16px, env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 10px) max(16px, env(safe-area-inset-left));
+  background: var(--card); border-top: 1px solid var(--line);
+}
+#select-count { flex: 1; font-size: 0.9rem; font-weight: 600; }
+#btn-select-delete:disabled { opacity: 0.45; }
+#btn-delete.wide { width: 100%; background: none; border: 1px solid var(--line); }
+.sort-acts button { white-space: nowrap; }
+body.selecting .tabbar { visibility: hidden; }
