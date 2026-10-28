@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.5';
+const APP_VERSION = '0.3.6';
 
 // ---------- Impostazioni ----------
 
@@ -339,9 +339,9 @@ const FIELDS = [
   { k: 'stile', quick: true, l: 'Stile', options: ['fermo', 'frizzante', 'spumante metodo classico', 'spumante metodo Martinotti/Charmat', 'rifermentato in bottiglia / col fondo', 'passito', 'vendemmia tardiva', 'muffato', 'liquoroso/fortificato'] },
   { k: 'caratteristiche', l: 'Caratteristiche (biologico, naturale…)', type: 'ARRAY' },
   { k: 'annata', quick: true, l: 'Annata', type: 'INTEGER' },
+  { k: 'nazione', quick: true, l: 'Nazione' },
   { k: 'vitigni', l: 'Vitigni', type: 'ARRAY' },
   { k: 'regione', l: 'Regione' },
-  { k: 'nazione', l: 'Nazione' },
   { k: 'gradazione', l: 'Gradazione (% vol)', type: 'NUMBER' },
   { k: 'formato_ml', l: 'Formato (ml)', type: 'INTEGER' },
   { k: 'affinamento', l: 'Affinamento' },
@@ -359,8 +359,9 @@ const DETAILS = FIELDS.filter((f) => !f.quick);
 
 // Primo passaggio: solo i dati che identificano il vino, per avere la scheda in pochi secondi.
 const QUICK_PROMPT = `Le immagini mostrano l'etichetta (ed eventualmente la retroetichetta) di UNA bottiglia di vino.
-Leggi solo: produttore, nome del vino, denominazione, classificazione (DOCG, DOC, IGT, IGP, AOC…), colore, stile, annata.
+Leggi solo: produttore, nome del vino, denominazione, classificazione (DOCG, DOC, IGT, IGP, AOC…), colore, stile, annata, nazione.
 Usa ciò che è scritto; se un dato non è leggibile lascialo null. Non inventare l'annata.
+Nazione: in italiano (Italia, Francia, Spagna…), dedotta anche da denominazione, lingua dell'etichetta o indirizzo del produttore.
 Colore: "orange" per i bianchi macerati sulle bucce ("macerato", "ramato", "amber", "skin contact").
 Stile: il più specifico; un Prosecco col fondo è "rifermentato in bottiglia / col fondo", un Franciacorta è "spumante metodo classico".
 In "campi_incerti" elenca le chiavi poco leggibili o dedotte.`;
@@ -539,16 +540,18 @@ function parseJsonText(text) {
 // La ricerca non si può combinare con lo schema JSON su tutti i modelli, quindi il JSON è chiesto nel testo.
 // Ricerca con Tavily (piano gratuito, senza carta): restituisce già il testo delle pagine trovate,
 // che Gemini legge senza usare la sua ricerca Google (non inclusa in tutti i piani gratuiti).
-async function tavilySearch(query, log, cost) {
-  log?.('Tavily · ricerca', query);
+async function tavilySearch(query, country, log, cost) {
+  log?.('Tavily · ricerca', query + (country ? `\n(siti preferiti: ${country})` : ''));
   const started = Date.now();
   let res;
   try {
     res = await fetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + settings.tavilyKey },
-      body: JSON.stringify({ query, search_depth: 'basic', max_results: 6, include_answer: false }),
+      body: JSON.stringify({ query, search_depth: 'basic', max_results: 8, include_answer: false, ...(country && { topic: 'general', country }) }),
     });
+    // Se Tavily non accetta il paese si riprova senza.
+    if (res.status === 400 && country) return tavilySearch(query, null, log, cost);
   } catch (e) {
     log?.('Tavily · errore di rete', `${e.message}\n(può essere un blocco CORS: Tavily non accetta chiamate dirette dal browser)`);
     throw new Error('Tavily non raggiungibile');
@@ -580,6 +583,42 @@ function searchPlan() {
 
 const SEARCH_NAME = { google: 'Google', tavily: 'Tavily' };
 
+// La parola "vino" nella lingua del paese fa capire al motore che si tratta di vino
+// (senza, "Pietta Kairos scheda tecnica prezzo" restituiva criptovalute e aziende omonime).
+// country fa preferire a Tavily i siti di quel paese: produttore ed enoteche locali.
+const SEARCH_LANG = [
+  { match: /ital/i, word: 'vino', country: 'italy' },
+  { match: /franc/i, word: 'vin', country: 'france' },
+  { match: /spagn|spain|españa/i, word: 'vino', country: 'spain' },
+  { match: /argentin/i, word: 'vino', country: 'argentina' },
+  { match: /cile|chile/i, word: 'vino', country: 'chile' },
+  { match: /portog|portugal/i, word: 'vinho', country: 'portugal' },
+  { match: /german|deutsch/i, word: 'Wein', country: 'germany' },
+  { match: /austria|österr/i, word: 'Wein', country: 'austria' },
+  { match: /svizzer|switz/i, word: 'vin Wein', country: 'switzerland' },
+  { match: /stati uniti|\busa\b|america|california/i, word: 'wine', country: 'united states' },
+  { match: /australia/i, word: 'wine', country: 'australia' },
+  { match: /zelanda|zealand/i, word: 'wine', country: 'new zealand' },
+  { match: /sudafrica|south africa/i, word: 'wine', country: 'south africa' },
+];
+
+function searchLang(data) {
+  return SEARCH_LANG.find((l) => l.match.test(data.nazione || 'Italia')) || { word: 'wine' };
+}
+
+function searchQuery(data) {
+  const who = data.produttore ? `"${data.produttore}"` : '';
+  return [who, data.nome, data.denominazione, data.annata, searchLang(data).word].filter(Boolean).join(' ');
+}
+
+// Scarta i risultati che non nominano né il produttore né il vino: sono omonimi o pagine fuori tema.
+function relevantResults(results, data) {
+  const norm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const names = [data.produttore, data.nome].filter(Boolean).map(norm);
+  if (!names.length) return results;
+  return results.filter((r) => names.some((n) => norm(r.title + ' ' + r.uri + ' ' + r.content).includes(n)));
+}
+
 async function geminiDetails(data, hooks, mode) {
   const who = QUICK.map((f) => data[f.k]).filter(Boolean).join(', ');
   const keys = DETAILS.map((f) => `"${f.k}"`).join(', ');
@@ -587,10 +626,12 @@ async function geminiDetails(data, hooks, mode) {
   let sources = [];
   if (mode === 'google') {
     intro = `Cerca su Google la scheda tecnica di questo vino: ${who}.
+Cerca per esempio: ${searchQuery(data)} (includi sempre la parola "vino" nella lingua del paese di origine, altrimenti trovi pagine che non parlano di vino).
 Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.`;
   } else if (mode === 'tavily') {
-    const query = ['produttore', 'nome', 'denominazione', 'annata'].map((k) => data[k]).filter(Boolean).join(' ');
-    sources = await tavilySearch(`${query} scheda tecnica prezzo`, hooks.log, hooks.cost);
+    const found = await tavilySearch(searchQuery(data), searchLang(data).country, hooks.log, hooks.cost);
+    sources = relevantResults(found, data);
+    if (sources.length < found.length) hooks.log?.(`Tavily · scartati ${found.length - sources.length} risultati che non nominano il vino`, '');
     intro = `Compila la scheda di questo vino: ${who}.
 Usa i risultati di ricerca qui sotto, preferendo il sito del produttore. Se riguardano un altro vino o un'altra annata, tienine conto.
 ${sources.map((r, n) => `[${n + 1}] ${r.title} (${r.uri})\n${r.content}`).join('\n\n') || '(nessun risultato)'}`;
@@ -1163,9 +1204,9 @@ function bindUi() {
   });
   $('#btn-google').addEventListener('click', () => {
     const form = $('#wine-form').elements;
-    const q = ['produttore', 'nome', 'denominazione', 'annata'].map((k) => form[k]?.value.trim()).filter(Boolean).join(' ');
-    if (!q) return toast('Compila almeno produttore o nome.');
-    window.open('https://www.google.com/search?q=' + encodeURIComponent(q + ' scheda tecnica'), '_blank', 'noopener');
+    const data = Object.fromEntries(['produttore', 'nome', 'denominazione', 'annata', 'nazione'].map((k) => [k, form[k]?.value.trim()]));
+    if (!data.produttore && !data.nome) return toast('Compila almeno produttore o nome.');
+    window.open('https://www.google.com/search?q=' + encodeURIComponent(searchQuery(data) + ' scheda'), '_blank', 'noopener');
   });
   $('#btn-rerun').addEventListener('click', async () => {
     const id = editingId;
