@@ -61,7 +61,7 @@ header h1 { margin: 0; font-size: 1.85rem; font-weight: 800; letter-spacing: -0.
   border-radius: 50%;
   background: var(--card); border: 1px solid var(--line); color: var(--fg);
 }
-.icon-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.icon-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 main { max-width: 720px; margin: 0 auto; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 10px; }
 main > section { display: flex; flex-direction: column; gap: 10px; }
@@ -344,3 +344,33 @@ input[type=search] { -webkit-appearance: none; appearance: none; }
 input[type=search]::-webkit-search-decoration { -webkit-appearance: none; }
 button.accent { background: var(--wine-soft); color: var(--wine-text); font-weight: 700; }
 .hero { justify-content: safe center; }
+
+/* Scheda vino: barra fissa in alto con Annulla e Salva */
+dialog.sheet.with-bar { padding-top: 0; }
+dialog.sheet.with-bar::before { display: none; }
+.sheet-bar {
+  position: sticky; top: 0; z-index: 2;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  margin: 0 -16px; padding: 8px 8px;
+  background: var(--card); border-bottom: 1px solid var(--line);
+}
+.sheet-bar .grab { width: 40px; height: 5px; border-radius: 3px; background: var(--line); }
+.bar-btn { background: none; padding: 8px 10px; color: var(--wine-text); font-weight: 600; justify-self: start; }
+.bar-btn.strong { justify-self: end; font-weight: 800; }
+.check { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border-radius: 12px; background: var(--wait-soft); color: var(--wait); font-size: 0.85rem; }
+.check .link { color: var(--wait); font-weight: 700; white-space: nowrap; }
+.box .text { margin: 0; font-size: 0.92rem; line-height: 1.5; color: var(--fg); }
+.box .text b { font-weight: 700; }
+.kv dd { overflow-wrap: anywhere; }
+
+/* Modulo di modifica a gruppi */
+#wine-fields { gap: 14px; }
+#wine-fields fieldset { margin: 0; padding: 12px; border: none; border-radius: 14px; background: var(--sunk); display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-width: 0; }
+#wine-fields legend { float: left; grid-column: 1 / -1; padding: 0; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+#wine-fields label { min-width: 0; }
+#wine-fields label.span2 { grid-column: 1 / -1; }
+#wine-fields input, #wine-fields textarea { background: var(--card); }
+#wine-fields textarea { resize: none; overflow: hidden; min-height: 44px; field-sizing: content; line-height: 1.4; }
+#wine-fields fieldset { align-items: end; }
+#wine-fields label.uncertain input, #wine-fields label.uncertain textarea { background: var(--warn); }
+.wname:focus { outline: none; }

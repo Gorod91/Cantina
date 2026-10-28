@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.5.1';
+const APP_VERSION = '0.5.2';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.5.2', notes: ['Scheda del vino più ordinata: Annulla e Salva sempre in alto; informazioni a blocchi (in cantina, quando berlo, il vino, in tavola) con abbinamenti e descrizione da leggere per intero.', 'Modifica dei dati divisa per argomento, campi corti due per riga, caselle di testo che si allungano da sole.'] },
   { v: '0.5.1', notes: ['Il tasto fotocamera ora fa scegliere tra scattare una foto e prenderle dalla libreria (anche più di una).'] },
   { v: '0.5.0', notes: ['Grafica rifatta da zero come nei prototipi, sempre scura.', 'Scheda del vino nuova: foto grande, quando berlo con la linea di oggi, bottiglie con − e +, prezzo e bevute. I dati da modificare sono in fondo, sotto "Modifica i dati del vino".'] },
   { v: '0.4.4', notes: ['Corretto: con un valore della cantina sopra i 100 € con i centesimi la lista restava vuota e le foto nuove non comparivano.'] },
@@ -481,7 +482,7 @@ const FIELDS = [
   { k: 'produttore', quick: true, l: 'Produttore' },
   { k: 'nome', quick: true, l: 'Nome del vino' },
   { k: 'denominazione', quick: true, l: 'Denominazione' },
-  { k: 'classificazione', quick: true, l: 'Classificazione (DOCG, DOC, IGT…)' },
+  { k: 'classificazione', quick: true, l: 'Classificazione' },
   { k: 'colore', quick: true, l: 'Colore', options: ['rosso', 'bianco', 'rosato', 'orange'] },
   { k: 'stile', quick: true, l: 'Stile', options: ['fermo', 'frizzante', 'spumante metodo classico', 'spumante metodo Martinotti/Charmat', 'rifermentato in bottiglia / col fondo', 'passito', 'vendemmia tardiva', 'muffato', 'liquoroso/fortificato'] },
   { k: 'caratteristiche', l: 'Caratteristiche (biologico, naturale…)', type: 'ARRAY' },
@@ -1452,12 +1453,24 @@ function renderLog(w, note = '') {
     : '<p class="hint">Nessun registro: tocca "Riconosci di nuovo" per generarlo.</p>');
 }
 
-// Parte alta della scheda, come nel prototipo: nome, finestra di consumo, bottiglie, dati principali.
+// Scheda in sola lettura, a blocchi: in cantina, quando berlo, il vino, in tavola. I campi da modificare stanno in fondo.
+const kvRows = (rows) => rows.filter((r) => r[1]).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+const joinList = (v) => (Array.isArray(v) ? v.join(', ') : v) || '';
+
 function renderWineHead(w) {
   const d = w.data || {};
+  const main = d.nome || d.denominazione || d.produttore;
   $('#wine-name').textContent = listTitle(w);
-  $('#wine-sub').textContent = [d.produttore !== (d.nome || d.denominazione || d.produttore) && d.produttore, d.denominazione !== (d.nome || d.denominazione) && d.denominazione,
-    (d.vitigni || []).join(', '), d.regione || d.nazione].filter(Boolean).join(' · ');
+  $('#wine-sub').textContent = [d.produttore !== main && d.produttore, d.denominazione !== main && d.denominazione].filter(Boolean).join(' · ');
+
+  $('#qty-out').textContent = Number(w.quantita) || 0;
+  const price = Number(d.prezzo) > 0 ? Number(d.prezzo) : null;
+  $('#wine-kv').innerHTML = kvRows([
+    ['Prezzo', price && `${formatPrice(price)} a bottiglia${Number(w.quantita) > 1 ? ` · valore ${formatPrice(price * w.quantita)}` : ''}`],
+    ['Posizione', w.posizione],
+    ['Aggiunto il', w.createdAt && new Date(w.createdAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })],
+  ]);
+
   const state = drinkState(d);
   const from = Number(d.bere_dal) || null;
   const to = Number(d.bere_entro) || null;
@@ -1473,19 +1486,47 @@ function renderWineHead(w) {
       <div class="box-row"><span class="label">Quando berlo</span><span class="pill ${state.k}">${esc(state.text)}</span></div>
       <div class="track"><span class="fill ${state.k}" style="left:${pos(a)};width:calc(${pos(b)} - ${pos(a)})"></span><span class="now" style="left:${pos(year)}"></span></div>
       <div class="ticks">${ticks.map((t) => `<span>${t}</span>`).join('')}</div>
-      ${d.finestra_consumo ? `<p class="hint">${esc(d.finestra_consumo)}</p>` : ''}`;
+      ${d.finestra_consumo ? `<p class="text">${esc(d.finestra_consumo)}</p>` : ''}`;
   }
   $('#wine-window').hidden = !state;
-  $('#qty-out').textContent = Number(w.quantita) || 0;
-  const price = Number(d.prezzo) > 0 ? Number(d.prezzo) : null;
-  const rows = [
-    ['Prezzo', price && `${formatPrice(price)}${Number(w.quantita) > 1 ? ` · valore ${formatPrice(price * w.quantita)}` : ''}`],
-    ['Posizione', w.posizione],
-    ['Colore', [d.colore, d.stile !== 'fermo' && d.stile].filter(Boolean).join(', ')],
+
+  const about = kvRows([
+    ['Produttore', d.produttore],
+    ['Denominazione', [d.denominazione, d.classificazione && !String(d.denominazione || '').includes(d.classificazione) && d.classificazione].filter(Boolean).join(' ')],
+    ['Annata', d.annata],
+    ['Zona', [d.regione, d.nazione].filter(Boolean).join(', ')],
+    ['Vitigni', joinList(d.vitigni)],
+    ['Tipo', [d.colore, d.stile].filter(Boolean).join(', ')],
     ['Gradazione', d.gradazione && `${String(d.gradazione).replace('.', ',')}% vol`],
-    ['Aggiunto', w.createdAt && new Date(w.createdAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' })],
-  ].filter((r) => r[1]);
-  $('#wine-kv').innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+    ['Formato', d.formato_ml && (Number(d.formato_ml) === 750 ? '75 cl' : `${Number(d.formato_ml) / 10} cl`)],
+    ['Caratteristiche', joinList(d.caratteristiche)],
+  ]);
+  $('#wine-about').innerHTML = about ? `<span class="label">Il vino</span><dl class="kv">${about}</dl>${d.affinamento ? `<p class="text"><b>Affinamento.</b> ${esc(d.affinamento)}</p>` : ''}` : '';
+  $('#wine-about').hidden = !about;
+
+  const table = [
+    d.temperatura_servizio && `<dl class="kv">${kvRows([['Servire a', d.temperatura_servizio]])}</dl>`,
+    d.abbinamenti && `<p class="text"><b>Abbinamenti.</b> ${esc(joinList(d.abbinamenti))}</p>`,
+    d.descrizione && `<p class="text">${esc(d.descrizione)}</p>`,
+  ].filter(Boolean).join('');
+  $('#wine-table').innerHTML = table ? `<span class="label">In tavola</span>${table}` : '';
+  $('#wine-table').hidden = !table;
+}
+
+// Modulo di modifica diviso per argomento; i campi corti stanno due per riga.
+const FIELD_GROUPS = [
+  ['Il vino', ['produttore', 'nome', 'denominazione', 'classificazione', 'annata', 'nazione', 'regione']],
+  ['Caratteristiche', ['colore', 'stile', 'vitigni', 'gradazione', 'formato_ml', 'caratteristiche', 'affinamento']],
+  ['Quando berlo', ['bere_dal', 'bere_entro', 'finestra_consumo']],
+  ['In tavola', ['temperatura_servizio', 'abbinamenti', 'descrizione']],
+  ['In cantina', ['quantita', 'prezzo', 'posizione']],
+];
+const SHORT_FIELDS = new Set(['classificazione', 'annata', 'nazione', 'regione', 'colore', 'stile', 'gradazione', 'formato_ml', 'bere_dal', 'bere_entro', 'temperatura_servizio', 'quantita', 'prezzo']);
+const LONG_TEXT = new Set(['abbinamenti', 'descrizione', 'finestra_consumo', 'affinamento']);
+
+function autosize(t) {
+  t.style.height = 'auto';
+  t.style.height = `${t.scrollHeight + 2}px`;
 }
 
 async function openWine(id) {
@@ -1526,21 +1567,29 @@ async function openWine(id) {
   const d = w.data || {};
   const uncertain = new Set(w.uncertain || []);
   const input = (k, l, v, type) => `
-    <label class="${uncertain.has(k) ? 'uncertain' : ''}">${esc(l)}
-      ${k === 'descrizione' || k === 'abbinamenti'
+    <label class="${uncertain.has(k) ? 'uncertain' : ''} ${SHORT_FIELDS.has(k) ? '' : 'span2'}">${esc(l)}
+      ${LONG_TEXT.has(k)
         ? `<textarea name="${k}" rows="2">${esc(v)}</textarea>`
         : `<input name="${k}" value="${esc(v)}" ${type ? `inputmode="${type}"` : ''} ${OPTIONS[k] ? `list="opt-${k}"` : ''}>`}
       ${OPTIONS[k] ? `<datalist id="opt-${k}">${OPTIONS[k].map((o) => `<option value="${esc(o)}">`).join('')}</datalist>` : ''}
     </label>`;
-  $('#wine-fields').innerHTML =
-    `<div class="grid2">${input('quantita', 'Bottiglie', w.quantita, 'numeric')}${input('posizione', 'Posizione in cantina', w.posizione)}</div>` +
-    FIELDS.map((f) => input(f.k, f.l, Array.isArray(d[f.k]) ? d[f.k].join(', ') : d[f.k],
-      f.type === 'INTEGER' ? 'numeric' : f.type === 'NUMBER' ? 'decimal' : '')).join('');
+  const byKey = Object.fromEntries(FIELDS.map((f) => [f.k, f]));
+  const field = (k) => {
+    if (k === 'quantita') return input(k, 'Bottiglie', w.quantita, 'numeric');
+    if (k === 'posizione') return input(k, 'Posizione in cantina', w.posizione);
+    const f = byKey[k];
+    return input(f.k, f.l, joinList(d[f.k]), f.type === 'INTEGER' ? 'numeric' : f.type === 'NUMBER' ? 'decimal' : '');
+  };
+  $('#wine-fields').innerHTML = FIELD_GROUPS.map(([title, keys]) =>
+    `<fieldset><legend>${esc(title)}</legend>${keys.map(field).join('')}</fieldset>`).join('');
   renderLog(w, apiCost.join(''));
-  // I dati da modificare stanno in fondo, chiusi; si aprono da soli se c'è qualcosa da sistemare.
-  $('#dlg-wine details.edit').open = w.status !== 'ok' || !!w.uncertain?.length || !!w.error;
+  // I dati da modificare stanno in fondo, chiusi; si aprono da soli solo se il vino non è stato riconosciuto.
+  $('#wine-edit').open = w.status !== 'ok' || !!w.error;
+  $('#wine-check').hidden = !w.uncertain?.length || $('#wine-edit').open;
   $('#dlg-wine').returnValue = '';
   $('#dlg-wine').showModal();
+  $('#dlg-wine').scrollTop = 0;
+  $('#wine-fields').querySelectorAll('textarea').forEach(autosize);
 }
 
 function readForm(w) {
@@ -1760,6 +1809,14 @@ function bindUi() {
   });
   $('#wine-form').addEventListener('input', (e) => {
     if (e.target.name === 'quantita') $('#qty-out').textContent = Math.max(0, parseInt(e.target.value, 10) || 0);
+    if (e.target.tagName === 'TEXTAREA') autosize(e.target);
+  });
+  // I campi nascosti nel riquadro chiuso hanno altezza zero: si misurano quando si apre.
+  $('#wine-edit').addEventListener('toggle', () => $('#wine-fields').querySelectorAll('textarea').forEach(autosize));
+  $('#btn-open-edit').addEventListener('click', () => {
+    $('#wine-edit').open = true;
+    $('#wine-check').hidden = true;
+    $('#wine-edit').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   $('#btn-wine-drink').addEventListener('click', async () => {
     const id = editingId;

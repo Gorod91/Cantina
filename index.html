@@ -20,7 +20,7 @@
 <body>
   <header>
     <h1 id="view-title">La mia cantina</h1>
-    <button id="btn-settings" class="icon-btn" aria-label="Impostazioni"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
+    <button id="btn-settings" class="icon-btn" aria-label="Impostazioni"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   </header>
 
   <main>
@@ -141,17 +141,25 @@
     </form>
   </dialog>
 
-  <dialog id="dlg-wine" class="sheet">
+  <dialog id="dlg-wine" class="sheet with-bar">
     <form method="dialog" id="wine-form">
+      <div class="sheet-bar">
+        <button value="cancel" formnovalidate class="bar-btn">Annulla</button>
+        <span class="grab"></span>
+        <button value="save" class="bar-btn strong">Salva</button>
+      </div>
       <div class="hero" id="wine-photos"></div>
       <div class="wine-head">
-        <div class="wname" id="wine-name"></div>
+        <div class="wname" id="wine-name" tabindex="-1" autofocus></div>
         <div class="wsub" id="wine-sub"></div>
       </div>
-      <div class="box window" id="wine-window"></div>
+      <div class="check" id="wine-check" hidden>
+        <span>Alcuni dati letti dall'etichetta sono da controllare.</span>
+        <button type="button" class="link" id="btn-open-edit">Controlla</button>
+      </div>
       <div class="box">
         <div class="box-row">
-          <span class="label">Bottiglie</span>
+          <span class="label">In cantina</span>
           <span class="stepper">
             <button type="button" data-step="-1" aria-label="Una bottiglia in meno">−</button>
             <output id="qty-out">0</output>
@@ -160,9 +168,12 @@
         </div>
         <dl class="kv" id="wine-kv"></dl>
       </div>
-      <div class="box" id="wine-drinks"></div>
       <button type="button" id="btn-wine-drink" class="accent wide">Segna bevuta</button>
-      <details class="edit">
+      <div class="box window" id="wine-window"></div>
+      <div class="box" id="wine-about"></div>
+      <div class="box" id="wine-table"></div>
+      <div class="box" id="wine-drinks"></div>
+      <details class="edit" id="wine-edit">
         <summary>Modifica i dati del vino</summary>
         <div id="wine-state" class="hint"></div>
         <div id="wine-fields"></div>
@@ -173,10 +184,6 @@
         </div>
         <details id="wine-debug" class="debug"><summary>Registro (debug)</summary><button type="button" id="btn-copy-log" class="small">Copia registro</button><div id="wine-log"></div></details>
       </details>
-      <div class="actions">
-        <button value="cancel" formnovalidate>Chiudi</button>
-        <button value="save" class="primary">Salva</button>
-      </div>
     </form>
   </dialog>
 
