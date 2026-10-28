@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.1.1';
 
 // ---------- Impostazioni ----------
 
@@ -94,15 +94,40 @@ function resize(img, maxSide, quality) {
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
 }
 
+// Le foto si salvano come ArrayBuffer: su iOS i Blob letti da IndexedDB a volte risultano illeggibili.
 async function preparePhoto(file) {
   const img = await loadImage(file);
+  const full = await resize(img, 1600, 0.85);
+  const thumb = await resize(img, 320, 0.75);
+  if (!full || !thumb) throw new Error('Impossibile elaborare la foto');
   return {
     id: crypto.randomUUID(),
-    blob: await resize(img, 1600, 0.85),
-    thumb: await resize(img, 320, 0.75),
+    bytes: await full.arrayBuffer(),
+    thumbBytes: await thumb.arrayBuffer(),
     driveId: null,
     error: null,
   };
+}
+
+const photoBlob = (p) => p.blob || new Blob([p.bytes], { type: 'image/jpeg' });
+const thumbBlob = (p) => p.thumb || new Blob([p.thumbBytes], { type: 'image/jpeg' });
+
+// Converte le foto salvate come Blob dalla versione 0.1.0.
+async function migratePhotos() {
+  for (const w of await allWines()) {
+    if (!w.photos.some((p) => p.blob)) continue;
+    const photos = [];
+    for (const p of w.photos) {
+      if (!p.blob) { photos.push(p); continue; }
+      const { blob, thumb, ...rest } = p;
+      try {
+        photos.push({ ...rest, bytes: await blob.arrayBuffer(), thumbBytes: await thumb.arrayBuffer() });
+      } catch {
+        photos.push({ ...rest, bytes: null, thumbBytes: null, lost: true, driveId: rest.driveId || 'perduta' });
+      }
+    }
+    await updateWine(w.id, (cur) => ({ ...cur, photos }));
+  }
 }
 
 function blobToBase64(blob) {
@@ -253,7 +278,7 @@ async function uploadPhotos(id) {
   for (let i = 0; i < wine.photos.length; i++) {
     if (wine.photos[i].driveId) continue;
     try {
-      const driveId = await driveUpload(wine.photos[i].blob, photoName(wine, i));
+      const driveId = await driveUpload(photoBlob(wine.photos[i]), photoName(wine, i));
       wine = await updateWine(id, (w) => {
         w.photos[i] = { ...w.photos[i], driveId, named: !!w.data, error: null };
         return w;
@@ -350,7 +375,7 @@ async function recognize(id) {
   const wine = await getWine(id);
   await updateWine(id, { status: 'recognizing', error: null });
   try {
-    const result = await geminiRecognize(wine.photos.map((p) => p.blob));
+    const result = await geminiRecognize(wine.photos.filter((p) => !p.lost).map(photoBlob));
     const { campi_incerti, e_un_vino, ...data } = result;
     await updateWine(id, {
       status: 'ok',
@@ -431,12 +456,20 @@ async function addFiles(files, sameWine) {
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-let objectUrls = [];
-function blobUrl(blob) {
+// Gli URL della lista e del dettaglio si liberano separatamente, così un aggiornamento della lista non rompe il dettaglio aperto.
+const objectUrls = { list: [], dialog: [] };
+function blobUrl(blob, group) {
   const u = URL.createObjectURL(blob);
-  objectUrls.push(u);
+  objectUrls[group].push(u);
   return u;
 }
+function releaseUrls(group) {
+  objectUrls[group].forEach(URL.revokeObjectURL);
+  objectUrls[group] = [];
+}
+const imgTag = (p, getBlob, group) => p.lost
+  ? '<span class="lost">Foto non recuperabile</span>'
+  : `<img src="${blobUrl(getBlob(p), group)}" alt="">`;
 
 function toast(msg) {
   const el = document.createElement('div');
@@ -475,8 +508,7 @@ function scheduleRender() {
 
 async function render() {
   const wines = (await allWines()).sort((a, b) => b.createdAt - a.createdAt);
-  objectUrls.forEach(URL.revokeObjectURL);
-  objectUrls = [];
+  releaseUrls('list');
   const q = $('#search').value.trim().toLowerCase();
   const shown = q
     ? wines.filter((w) => JSON.stringify(w.data || {}).toLowerCase().includes(q) || (w.posizione || '').toLowerCase().includes(q))
@@ -485,7 +517,7 @@ async function render() {
   $('#count').textContent = `(${wines.length} vini, ${bottles} bottiglie)`;
   $('#wine-list').innerHTML = shown.map((w) => `
     <li data-id="${w.id}">
-      <img src="${blobUrl(w.photos[0].thumb)}" alt="">
+      ${imgTag(w.photos[0], thumbBlob, 'list')}
       <div>
         <strong>${esc(wineTitle(w))}</strong>
         <small>${esc(wineSubtitle(w))}</small>
@@ -510,7 +542,7 @@ async function openWine(id) {
   const w = await getWine(id);
   if (!w) return;
   editingId = id;
-  $('#wine-photos').innerHTML = w.photos.map((p) => `<img src="${blobUrl(p.blob)}" alt="">`).join('');
+  $('#wine-photos').innerHTML = w.photos.map((p) => imgTag(p, photoBlob, 'dialog')).join('');
   const state = [];
   if (w.error) state.push('Errore: ' + w.error);
   if (w.uncertain?.length) state.push('Campi incerti evidenziati in giallo.');
@@ -613,6 +645,7 @@ function bindUi() {
   $('#dlg-wine').addEventListener('close', async () => {
     const id = editingId;
     editingId = null;
+    releaseUrls('dialog');
     if ($('#dlg-wine').returnValue !== 'save' || !id) return;
     if (await updateWine(id, readForm)) renamePhotos(id);
   });
@@ -654,4 +687,4 @@ bindUi();
 updateDriveStatus();
 registerServiceWorker();
 navigator.storage?.persist?.();
-render().then(processPending);
+migratePhotos().catch(() => {}).then(render).then(processPending);

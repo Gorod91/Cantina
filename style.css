@@ -166,3 +166,16 @@ footer { text-align: center; color: var(--muted); font-size: 0.75rem; padding: 1
   text-align: center;
   z-index: 10;
 }
+
+.lost {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 84px;
+  flex: none;
+  border-radius: 6px;
+  background: var(--warn);
+  font-size: 0.65rem;
+  text-align: center;
+}
