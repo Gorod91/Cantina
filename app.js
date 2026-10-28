@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.4.4';
+const APP_VERSION = '0.5.0';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.5.0', notes: ['Grafica rifatta da zero come nei prototipi, sempre scura.', 'Scheda del vino nuova: foto grande, quando berlo con la linea di oggi, bottiglie con − e +, prezzo e bevute. I dati da modificare sono in fondo, sotto "Modifica i dati del vino".'] },
   { v: '0.4.4', notes: ['Corretto: con un valore della cantina sopra i 100 € con i centesimi la lista restava vuota e le foto nuove non comparivano.'] },
   { v: '0.4.3', notes: ['Se il database del telefono non risponde o c\'è un errore, compare un riquadro con i dettagli da copiare.'] },
   { v: '0.4.2', notes: ['Corretto: dopo l\'aggiornamento alla 0.4 la lista poteva restare vuota e le foto non venivano salvate. I vini non erano persi.', 'Tema scuro sempre attivo.'] },
@@ -1450,6 +1451,42 @@ function renderLog(w, note = '') {
     : '<p class="hint">Nessun registro: tocca "Riconosci di nuovo" per generarlo.</p>');
 }
 
+// Parte alta della scheda, come nel prototipo: nome, finestra di consumo, bottiglie, dati principali.
+function renderWineHead(w) {
+  const d = w.data || {};
+  $('#wine-name').textContent = listTitle(w);
+  $('#wine-sub').textContent = [d.produttore !== (d.nome || d.denominazione || d.produttore) && d.produttore, d.denominazione !== (d.nome || d.denominazione) && d.denominazione,
+    (d.vitigni || []).join(', '), d.regione || d.nazione].filter(Boolean).join(' · ');
+  const state = drinkState(d);
+  const from = Number(d.bere_dal) || null;
+  const to = Number(d.bere_entro) || null;
+  if (state) {
+    const year = new Date().getFullYear() + new Date().getMonth() / 12;
+    const lo = Math.floor(Math.min(from || to - 4, year) - 1);
+    const hi = Math.ceil(Math.max(to || from + 4, year) + 1);
+    const pos = (y) => `${((y - lo) / (hi - lo) * 100).toFixed(1)}%`;
+    const a = from || lo;
+    const b = to || hi;
+    const ticks = [lo, Math.round((lo * 2 + hi) / 3), Math.round((lo + hi * 2) / 3), hi];
+    $('#wine-window').innerHTML = `
+      <div class="box-row"><span class="label">Quando berlo</span><span class="pill ${state.k}">${esc(state.text)}</span></div>
+      <div class="track"><span class="fill ${state.k}" style="left:${pos(a)};width:calc(${pos(b)} - ${pos(a)})"></span><span class="now" style="left:${pos(year)}"></span></div>
+      <div class="ticks">${ticks.map((t) => `<span>${t}</span>`).join('')}</div>
+      ${d.finestra_consumo ? `<p class="hint">${esc(d.finestra_consumo)}</p>` : ''}`;
+  }
+  $('#wine-window').hidden = !state;
+  $('#qty-out').textContent = Number(w.quantita) || 0;
+  const price = Number(d.prezzo) > 0 ? Number(d.prezzo) : null;
+  const rows = [
+    ['Prezzo', price && `${formatPrice(price)}${Number(w.quantita) > 1 ? ` · valore ${formatPrice(price * w.quantita)}` : ''}`],
+    ['Posizione', w.posizione],
+    ['Colore', [d.colore, d.stile !== 'fermo' && d.stile].filter(Boolean).join(', ')],
+    ['Gradazione', d.gradazione && `${String(d.gradazione).replace('.', ',')}% vol`],
+    ['Aggiunto', w.createdAt && new Date(w.createdAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' })],
+  ].filter((r) => r[1]);
+  $('#wine-kv').innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+}
+
 async function openWine(id) {
   const w = await getWine(id);
   if (!w) return;
@@ -1481,8 +1518,10 @@ async function openWine(id) {
     : '');
   const drinks = (await allDrinks()).filter((x) => x.wineId === id).sort((a, b) => b.data.localeCompare(a.data));
   $('#wine-drinks').innerHTML = drinks.length
-    ? `<h3>Bevute</h3><ul class="history">${drinks.map((x) => `<li><span>${esc(dayLabel(x.data))}${x.dove === 'fuori' ? ' · fuori' : ''}</span><b>${x.voto ?? ''}</b></li>`).join('')}</ul>`
+    ? `<span class="label">Bevute</span><ul class="history">${drinks.map((x) => `<li><span>${esc(dayLabel(x.data))}${x.dove === 'fuori' ? ` · ${esc(x.locale || 'fuori')}` : ', a casa'}</span><b>${x.voto ?? ''}</b></li>`).join('')}</ul>`
     : '';
+  $('#wine-drinks').hidden = !drinks.length;
+  renderWineHead(w);
   const d = w.data || {};
   const uncertain = new Set(w.uncertain || []);
   const input = (k, l, v, type) => `
@@ -1497,6 +1536,8 @@ async function openWine(id) {
     FIELDS.map((f) => input(f.k, f.l, Array.isArray(d[f.k]) ? d[f.k].join(', ') : d[f.k],
       f.type === 'INTEGER' ? 'numeric' : f.type === 'NUMBER' ? 'decimal' : '')).join('');
   renderLog(w, apiCost.join(''));
+  // I dati da modificare stanno in fondo, chiusi; si aprono da soli se c'è qualcosa da sistemare.
+  $('#dlg-wine details.edit').open = w.status !== 'ok' || !!w.uncertain?.length || !!w.error;
   $('#dlg-wine').returnValue = '';
   $('#dlg-wine').showModal();
 }
@@ -1711,6 +1752,17 @@ function bindUi() {
     if (!li) return;
     const drink = (await allDrinks()).find((d) => d.id === li.dataset.drink);
     if (drink) openDrink(drink);
+  });
+  $('#dlg-wine .stepper').addEventListener('click', (e) => {
+    const step = Number(e.target.closest('button[data-step]')?.dataset.step);
+    if (!step) return;
+    const input = $('#wine-form').elements.quantita;
+    const q = Math.max(0, (parseInt(input.value, 10) || 0) + step);
+    input.value = q;
+    $('#qty-out').textContent = q;
+  });
+  $('#wine-form').addEventListener('input', (e) => {
+    if (e.target.name === 'quantita') $('#qty-out').textContent = Math.max(0, parseInt(e.target.value, 10) || 0);
   });
   $('#btn-wine-drink').addEventListener('click', async () => {
     const id = editingId;

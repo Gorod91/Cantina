@@ -143,16 +143,37 @@
 
   <dialog id="dlg-wine" class="sheet">
     <form method="dialog" id="wine-form">
-      <div class="photos" id="wine-photos"></div>
-      <div id="wine-state" class="hint"></div>
-      <div id="wine-drinks"></div>
-      <div id="wine-fields"></div>
-      <details id="wine-debug" class="debug"><summary>Registro (debug)</summary><button type="button" id="btn-copy-log" class="small">Copia registro</button><div id="wine-log"></div></details>
+      <div class="hero" id="wine-photos"></div>
+      <div class="wine-head">
+        <div class="wname" id="wine-name"></div>
+        <div class="wsub" id="wine-sub"></div>
+      </div>
+      <div class="box window" id="wine-window"></div>
+      <div class="box">
+        <div class="box-row">
+          <span class="label">Bottiglie</span>
+          <span class="stepper">
+            <button type="button" data-step="-1" aria-label="Una bottiglia in meno">−</button>
+            <output id="qty-out">0</output>
+            <button type="button" data-step="1" aria-label="Una bottiglia in più">+</button>
+          </span>
+        </div>
+        <dl class="kv" id="wine-kv"></dl>
+      </div>
+      <div class="box" id="wine-drinks"></div>
+      <button type="button" id="btn-wine-drink" class="accent wide">Segna bevuta</button>
+      <details class="edit">
+        <summary>Modifica i dati del vino</summary>
+        <div id="wine-state" class="hint"></div>
+        <div id="wine-fields"></div>
+        <div class="actions">
+          <button type="button" id="btn-google">Cerca su Google</button>
+          <button type="button" id="btn-rerun">Riconosci di nuovo</button>
+          <button type="button" id="btn-delete" class="danger">Elimina vino</button>
+        </div>
+        <details id="wine-debug" class="debug"><summary>Registro (debug)</summary><button type="button" id="btn-copy-log" class="small">Copia registro</button><div id="wine-log"></div></details>
+      </details>
       <div class="actions">
-        <button type="button" id="btn-delete" class="danger">Elimina</button>
-        <button type="button" id="btn-wine-drink">Segna bevuta</button>
-        <button type="button" id="btn-google">Cerca su Google</button>
-        <button type="button" id="btn-rerun">Riconosci di nuovo</button>
         <button value="cancel" formnovalidate>Chiudi</button>
         <button value="save" class="primary">Salva</button>
       </div>
@@ -196,7 +217,7 @@
     </form>
   </dialog>
 
-  <dialog id="dlg-notes">
+  <dialog id="dlg-notes" class="sheet">
     <form method="dialog">
       <h2>Note di rilascio</h2>
       <div id="notes-list"></div>
