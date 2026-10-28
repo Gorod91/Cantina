@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.3';
+const APP_VERSION = '0.2.4';
 
 // ---------- Impostazioni ----------
 
@@ -931,6 +931,13 @@ function bindUi() {
     releaseUrls('dialog');
     if ($('#dlg-wine').returnValue !== 'save' || !id) return;
     if (await updateWine(id, readForm)) renamePhotos(id);
+  });
+  // Ricerca manuale: apre Google con i dati che identificano il vino, come sono ora nella scheda.
+  $('#btn-google').addEventListener('click', () => {
+    const form = $('#wine-form').elements;
+    const q = ['produttore', 'nome', 'denominazione', 'annata'].map((k) => form[k]?.value.trim()).filter(Boolean).join(' ');
+    if (!q) return toast('Compila almeno produttore o nome.');
+    window.open('https://www.google.com/search?q=' + encodeURIComponent(q + ' scheda tecnica'), '_blank', 'noopener');
   });
   $('#btn-rerun').addEventListener('click', async () => {
     const id = editingId;
