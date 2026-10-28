@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#6b1d2a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Cantina">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <title>Cantina</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <header>
+    <h1>Cantina</h1>
+    <button id="btn-settings" class="ghost" aria-label="Impostazioni">⚙︎</button>
+  </header>
+
+  <main>
+    <section id="status-bar">
+      <span id="drive-status">Drive: non collegato</span>
+      <button id="btn-login" class="small">Accedi a Drive</button>
+    </section>
+
+    <section id="add">
+      <label class="big-btn">
+        📷 Scatta foto
+        <input id="in-camera" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+      <label class="big-btn">
+        🖼️ Importa immagini
+        <input id="in-files" type="file" accept="image/*" multiple hidden>
+      </label>
+      <label class="check">
+        <input id="same-wine" type="checkbox">
+        Le immagini importate insieme sono dello stesso vino (fronte/retro)
+      </label>
+    </section>
+
+    <section id="pending-section" hidden>
+      <div class="row">
+        <h2>In attesa</h2>
+        <button id="btn-retry" class="small">Riprova tutto</button>
+      </div>
+      <p class="hint" id="pending-hint"></p>
+    </section>
+
+    <section>
+      <h2>Vini <span id="count"></span></h2>
+      <input id="search" type="search" placeholder="Cerca per produttore, nome, denominazione…">
+      <ul id="wine-list"></ul>
+    </section>
+  </main>
+
+  <footer>v<span id="app-version"></span></footer>
+
+  <dialog id="dlg-wine">
+    <form method="dialog" id="wine-form">
+      <div class="photos" id="wine-photos"></div>
+      <div id="wine-state" class="hint"></div>
+      <div id="wine-fields"></div>
+      <div class="actions">
+        <button type="button" id="btn-delete" class="danger">Elimina</button>
+        <button type="button" id="btn-rerun">Riconosci di nuovo</button>
+        <button value="cancel" formnovalidate>Chiudi</button>
+        <button value="save" class="primary">Salva</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-settings">
+    <form method="dialog" id="settings-form">
+      <h2>Impostazioni</h2>
+      <label>Chiave API Gemini
+        <input name="geminiKey" type="password" autocomplete="off" placeholder="AIza…">
+      </label>
+      <label>Modello Gemini
+        <input name="geminiModel" placeholder="gemini-flash-latest">
+      </label>
+      <label>Google OAuth Client ID (per Drive)
+        <input name="googleClientId" autocomplete="off" placeholder="…apps.googleusercontent.com">
+      </label>
+      <label>Cartella su Drive
+        <input name="driveFolder" placeholder="Cantina">
+      </label>
+      <p class="hint">Chiavi e dati restano solo su questo dispositivo.</p>
+      <div class="actions">
+        <button type="button" id="btn-export">Esporta JSON</button>
+        <button type="button" id="btn-logout">Esci da Drive</button>
+        <button value="cancel" formnovalidate>Annulla</button>
+        <button value="save" class="primary">Salva</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
