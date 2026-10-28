@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.7.6';
+const APP_VERSION = '0.8.0';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.8.0', notes: ['Versione per PC (finestra larga almeno 1000 px): barra laterale, lista a colonne ordinabile toccando le intestazioni, scheda del vino fissa a destra (cliccando un altro vino si salva e passa a quello), foto trascinabili sulla finestra, / per cercare, Esc per chiudere la scheda.'] },
   { v: '0.7.6', notes: ['Fronte e retro con la fotocamera: dopo la foto tocca l\'avviso "fotografa anche il retro". Nella scheda del vino c\'è "Aggiungi foto". Il vino viene riletto con tutte le foto.'] },
   { v: '0.7.5', notes: ['Raggruppa le foto più comodo: foto grandi, lente per vederle intere, scegli le foto dello stesso vino e premi Unisci (o Separa per dividerle).'] },
   { v: '0.7.4', notes: ['Etichetta prima del web: vitigni, gradazione, formato, regione e caratteristiche stampati in etichetta o retroetichetta vengono letti dalla foto e il web non li sovrascrive, li completa solo se mancano.', 'Dopo "Unisci" il vino viene riletto con tutte le foto insieme.'] },
@@ -1339,6 +1340,12 @@ function colorIcon(d, size = 'sm') {
 const paidOrEstimate = (w) => (Number(w.prezzo_pagato) > 0 ? Number(w.prezzo_pagato) : Number(w.data?.prezzo) > 0 ? Number(w.data.prezzo) : null);
 
 // Stato rispetto alla finestra di consumo, solo per i vini con annata.
+const drinkYears = (d) => {
+  const a = Number(d?.bere_dal) || null;
+  const b = Number(d?.bere_entro) || null;
+  return a && b ? `${a}–${b}` : a ? `dal ${a}` : b ? `entro ${b}` : '';
+};
+
 function drinkState(d) {
   d = d || {};
   const from = Number(d.bere_dal) || null;
@@ -1498,7 +1505,7 @@ async function render() {
     const p = paidOrEstimate(w);
     const price = p ? `${Number(w.prezzo_pagato) > 0 ? '' : '~'}${formatPrice(p)}` : '';
     return `
-    <li data-id="${w.id}" class="${Number(w.quantita) > 0 ? '' : 'finished'}${selection.ids.has(w.id) ? ' sel' : ''}">
+    <li data-id="${w.id}" class="${Number(w.quantita) > 0 ? '' : 'finished'}${selection.ids.has(w.id) ? ' sel' : ''}${w.id === editingId ? ' cur' : ''}">
       <div class="row-under">Bevuta</div>
       <div class="row">
         <span class="tick" aria-hidden="true"></span>
@@ -1513,6 +1520,10 @@ async function render() {
           <span class="qty">${price ? `<span class="price">${esc(price)}</span> ` : ''}×${Number(w.quantita) || 0}</span>
           ${state ? `<span class="pill ${state.k}" title="${esc(state.title)}">${esc(state.text)}</span>` : ''}
         </div>
+        <span class="dc">${esc(w.data?.annata || '')}</span>
+        <span class="dc">${state ? `<span class="pill ${state.k}" title="${esc(state.title)}">${esc(state.text)}</span>` : ''}<small>${esc(drinkYears(w.data))}</small></span>
+        <span class="dc num">${esc(price)}</span>
+        <span class="dc num"><b>${Number(w.quantita) || 0}</b></span>
       </div>
     </li>`;
   }).join('') || `<li class="empty">${q || nf ? 'Nessun vino trovato con questa ricerca o questi filtri.' : 'Nessun vino in cantina. Tocca la fotocamera in basso per aggiungerne uno.'}</li>`;
@@ -1636,6 +1647,54 @@ function bindSwipe() {
     if (!li) return;
     if (selection.on) toggleSelected(li);
     else openWine(li.dataset.id);
+  });
+}
+
+// ---------- PC ----------
+
+const DESK_COLS = [['nome', 'Vino'], ['annata', 'Annata'], ['bere', 'Quando berlo'], ['prezzo', 'Prezzo']];
+
+function renderListHead() {
+  const cur = $('#sort').value;
+  $('#list-head').innerHTML = '<span></span>' + DESK_COLS.map(([k, l], i) =>
+    `<button type="button" data-sort="${k}" class="${cur === k ? 'on' : ''}${i >= 3 ? ' num' : ''}" title="Ordina per ${l.toLowerCase()}">${l}${cur === k ? ' ↓' : ''}</button>`).join('') + '<span class="num">Bott.</span>';
+}
+
+function bindDesk() {
+  renderListHead();
+  $('#list-head').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sort]');
+    if (!b) return;
+    $('#sort').value = b.dataset.sort;
+    $('#sort').dispatchEvent(new Event('change'));
+  });
+  $('#sort').addEventListener('change', renderListHead);
+  // Su PC Esc chiude il pannello salvando, come passare a un altro vino.
+  document.addEventListener('keydown', (e) => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName);
+    if (e.key === '/' && !typing && !document.querySelector('dialog[open]:modal')) {
+      e.preventDefault();
+      showView('cellar');
+      $('#search').focus();
+    } else if (e.key === 'Escape' && $('#dlg-wine').open && !$('#dlg-wine').matches(':modal') && !document.querySelector('dialog[open]:modal')) {
+      $('#dlg-wine').close('save');
+    }
+  });
+  // Foto trascinate sulla finestra: come sceglierle dal pulsante.
+  let depth = 0;
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  document.addEventListener('dragenter', (e) => { if (hasFiles(e)) { depth++; document.body.classList.add('dropping'); } });
+  document.addEventListener('dragleave', (e) => { if (hasFiles(e) && --depth <= 0) { depth = 0; document.body.classList.remove('dropping'); } });
+  document.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+  document.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth = 0;
+    document.body.classList.remove('dropping');
+    const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return toast('Trascina delle foto (JPEG, PNG, HEIC).');
+    if (files.length < 2) addFiles(files);
+    else startGrouping(files);
   });
 }
 
@@ -1984,10 +2043,29 @@ function autosize(t) {
   t.style.height = `${t.scrollHeight + 2}px`;
 }
 
+// Chiude il lavoro sulla scheda aperta. I valori del modulo si leggono subito,
+// così su PC si può passare a un altro vino senza perdere quello che si è scritto.
+function finishWine(save) {
+  const id = editingId;
+  editingId = null;
+  releaseUrls('dialog');
+  if (!save || !id) return;
+  const fd = new FormData($('#wine-form'));
+  updateWine(id, (w) => readForm(w, fd)).then((w) => w && renamePhotos(id));
+}
+
+// Su PC la scheda del vino è un pannello fisso a destra e la lista resta usabile.
+const isDesk = () => matchMedia('(min-width: 1000px)').matches;
+function markCurrent() {
+  document.querySelectorAll('#wine-list li[data-id]').forEach((li) => li.classList.toggle('cur', li.dataset.id === editingId));
+}
+
 async function openWine(id) {
   const w = await getWine(id);
   if (!w) return;
+  if ($('#dlg-wine').open && editingId && editingId !== id) finishWine(true);
   editingId = id;
+  markCurrent();
   renderHero(w.photos);
   $('#btn-crop').hidden = !settings.geminiKey || !w.photos.some((p) => !p.lost);
   const state = [];
@@ -2054,14 +2132,16 @@ async function openWine(id) {
     $('#btn-not-twin').dataset.twin = twin.id;
   }
   $('#dlg-wine').returnValue = '';
-  $('#dlg-wine').showModal();
+  if (!$('#dlg-wine').open) {
+    if (isDesk()) $('#dlg-wine').show();
+    else $('#dlg-wine').showModal();
+  }
   $('#dlg-wine').scrollTop = 0;
   $('#wine-form').elements.nota.value = w.nota || '';
   $('#dlg-wine').querySelectorAll('textarea').forEach(autosize);
 }
 
-function readForm(w) {
-  const fd = new FormData($('#wine-form'));
+function readForm(w, fd = new FormData($('#wine-form'))) {
   const data = { ...(w.data || {}) };
   const edited = new Set(w.edited || []);
   for (const f of FIELDS) {
@@ -2249,6 +2329,7 @@ function bindUi() {
   });
   bindGrouping();
   bindSelection();
+  bindDesk();
   $('#in-more').addEventListener('change', (e) => {
     const files = [...e.target.files];
     e.target.value = '';
@@ -2378,12 +2459,9 @@ function bindUi() {
     scheduleRender();
   });
 
-  $('#dlg-wine').addEventListener('close', async () => {
-    const id = editingId;
-    editingId = null;
-    releaseUrls('dialog');
-    if ($('#dlg-wine').returnValue !== 'save' || !id) return;
-    if (await updateWine(id, readForm)) renamePhotos(id);
+  $('#dlg-wine').addEventListener('close', () => {
+    finishWine($('#dlg-wine').returnValue === 'save');
+    markCurrent();
   });
   // Ricerca manuale: apre Google con i dati che identificano il vino, come sono ora nella scheda.
   $('#btn-copy-log').addEventListener('click', async () => {
