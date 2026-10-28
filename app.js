@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.1.3';
+const APP_VERSION = '0.1.4';
 
 // ---------- Impostazioni ----------
 
@@ -417,18 +417,74 @@ Colore: uno tra ${OPTIONS.colore.join(', ')}. Stile: uno tra ${OPTIONS.stile.joi
   return { result, sources };
 }
 
+// ---------- Avanzamento ----------
+
+// Gemini non comunica l'avanzamento: la barra si basa sulla durata media delle ultime richieste.
+const DEFAULT_TIMINGS = { label: 8000, web: 15000 };
+const progress = new Map();
+
+function timings() {
+  try {
+    return { ...DEFAULT_TIMINGS, ...JSON.parse(localStorage.getItem('cantina.timings') || '{}') };
+  } catch {
+    return { ...DEFAULT_TIMINGS };
+  }
+}
+
+function recordTiming(phase, ms) {
+  const t = timings();
+  t[phase] = Math.round(t[phase] * 0.7 + ms * 0.3);
+  localStorage.setItem('cantina.timings', JSON.stringify(t));
+}
+
+async function timed(id, phase, fn) {
+  const start = Date.now();
+  progress.set(id, { phase, start, web: settings.webCheck !== 'no' });
+  tickProgress();
+  const out = await fn();
+  recordTiming(phase, Date.now() - start);
+  return out;
+}
+
+function progressInfo(id) {
+  const p = progress.get(id);
+  if (!p) return null;
+  const t = timings();
+  const total = t.label + (p.web ? t.web : 0);
+  const done = (p.phase === 'web' ? t.label : 0) + (Date.now() - p.start);
+  const left = Math.max(1, Math.round((total - done) / 1000));
+  const label = p.phase === 'web' ? 'Verifica su Google' : 'Lettura etichetta';
+  const step = p.web ? (p.phase === 'web' ? ' (2/2)' : ' (1/2)') : '';
+  return {
+    pct: Math.min(95, Math.round((done / total) * 100)),
+    text: done < total ? `${label}${step}… circa ${left} s` : `${label}${step}… quasi fatto`,
+  };
+}
+
+let ticker = null;
+function tickProgress() {
+  for (const el of document.querySelectorAll('.progress[data-id]')) {
+    const info = progressInfo(el.dataset.id);
+    if (!info) continue;
+    el.querySelector('i').style.width = info.pct + '%';
+    el.querySelector('span').textContent = info.text;
+  }
+  if (progress.size && !ticker) ticker = setInterval(tickProgress, 250);
+  if (!progress.size && ticker) { clearInterval(ticker); ticker = null; }
+}
+
 async function recognize(id) {
   if (!settings.geminiKey) return;
   const wine = await getWine(id);
   await updateWine(id, { status: 'recognizing', error: null });
   try {
-    const result = await geminiRecognize(wine.photos.filter((p) => !p.lost).map(photoBlob));
+    const result = await timed(id, 'label', () => geminiRecognize(wine.photos.filter((p) => !p.lost).map(photoBlob)));
     const { campi_incerti, e_un_vino, ...data } = result;
     let uncertain = campi_incerti || [];
     let web = null;
     if (settings.webCheck !== 'no' && e_un_vino !== false && (data.produttore || data.nome)) {
       try {
-        const { result: found, sources } = await geminiWebCheck(data);
+        const { result: found, sources } = await timed(id, 'web', () => geminiWebCheck(data));
         const confirmed = new Set(found.vino_trovato === false ? [] : found.confermati || []);
         for (const k of WEB_FIELDS) {
           if (confirmed.has(k) && found[k] != null && found[k] !== '') data[k] = found[k];
@@ -450,6 +506,9 @@ async function recognize(id) {
     await renamePhotos(id);
   } catch (e) {
     await updateWine(id, { status: 'error', error: e.message });
+  } finally {
+    progress.delete(id);
+    tickProgress();
   }
 }
 
@@ -554,12 +613,19 @@ function wineSubtitle(w) {
 
 function wineBadges(w) {
   const b = [];
-  if (w.status === 'recognizing' || (w.status === 'new' && settings.geminiKey)) b.push('Riconoscimento…');
+  if (w.status === 'new' && settings.geminiKey && !progress.has(w.id)) b.push('In coda…');
   if (w.status === 'new' && !settings.geminiKey) b.push('Da riconoscere');
   if (w.status === 'error') b.push('Errore Gemini');
   if (w.notWine) b.push('Non sembra un vino');
   if (w.photos.some((p) => !p.driveId)) b.push('Drive in attesa');
   return b;
+}
+
+function progressBar(id) {
+  const info = progressInfo(id);
+  return info
+    ? `<div class="progress" data-id="${id}"><b><i style="width:${info.pct}%"></i></b><span>${esc(info.text)}</span></div>`
+    : '';
 }
 
 let renderQueued = false;
@@ -585,6 +651,7 @@ async function render() {
         <strong>${esc(wineTitle(w))}</strong>
         <small>${esc(wineSubtitle(w))}</small>
         <small>${w.quantita} bott.${w.posizione ? ' · ' + esc(w.posizione) : ''}</small>
+        ${progressBar(w.id)}
         ${wineBadges(w).map((b) => `<span class="badge">${esc(b)}</span>`).join('')}
       </div>
     </li>`).join('') || '<li class="empty">Nessun vino. Scatta o importa una foto per iniziare.</li>';
