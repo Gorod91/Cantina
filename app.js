@@ -1,9 +1,17 @@
 'use strict';
 
-const APP_VERSION = '0.5.2';
+const APP_VERSION = '0.6.0';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.6.0', notes: [
+    'Il colore del vino è un calice colorato (flûte per le bollicine) invece della scritta.',
+    'Filtri: colore, quando berlo, provenienza, prezzo e negozio. Il pulsante accanto alla ricerca mostra quanti filtri sono attivi.',
+    'Dati di acquisto: dove, quando e prezzo pagato (in "Modifica i dati del vino"). Il prezzo pagato sostituisce la stima nella lista; la stima ha la ~.',
+    'Annate: nuova scheda nella barra in basso con le finestre di consumo su una linea del tempo e la linea di oggi.',
+    'Anteprima ritagliata sulla bottiglia: per i nuovi vini arriva con la lettura dell\'etichetta; per quelli già inseriti c\'è "Ritaglia sulla bottiglia" nella modifica.',
+    'Le impostazioni sono nella barra in basso.',
+  ] },
   { v: '0.5.2', notes: ['Scheda del vino più ordinata: Annulla e Salva sempre in alto; informazioni a blocchi (in cantina, quando berlo, il vino, in tavola) con abbinamenti e descrizione da leggere per intero.', 'Modifica dei dati divisa per argomento, campi corti due per riga, caselle di testo che si allungano da sole.'] },
   { v: '0.5.1', notes: ['Il tasto fotocamera ora fa scegliere tra scattare una foto e prenderle dalla libreria (anche più di una).'] },
   { v: '0.5.0', notes: ['Grafica rifatta da zero come nei prototipi, sempre scura.', 'Scheda del vino nuova: foto grande, quando berlo con la linea di oggi, bottiglie con − e +, prezzo e bevute. I dati da modificare sono in fondo, sotto "Modifica i dati del vino".'] },
@@ -244,7 +252,42 @@ async function preparePhoto(file) {
 }
 
 const photoBlob = (p) => p.blob || new Blob([p.bytes], { type: 'image/jpeg' });
-const thumbBlob = (p) => p.thumb || new Blob([p.thumbBytes], { type: 'image/jpeg' });
+const thumbBlob = (p) => p.thumb || new Blob([p.cropBytes || p.thumbBytes], { type: 'image/jpeg' });
+// Nella scheda la prima foto si mostra ritagliata sulla bottiglia, se il ritaglio c'è.
+const heroBlob = (p) => (p.cropBytes ? new Blob([p.cropBytes], { type: 'image/jpeg' }) : photoBlob(p));
+
+// Ritaglia la foto sul riquadro [ymin, xmin, ymax, xmax] in millesimi indicato da Gemini, con un po' di margine.
+async function cropToBox(blob, box) {
+  if (!Array.isArray(box) || box.length !== 4) return null;
+  let [y0, x0, y1, x1] = box.map((n) => Math.min(1000, Math.max(0, Number(n) || 0)) / 1000);
+  if (y1 - y0 < 0.1 || x1 - x0 < 0.05) return null;
+  const padY = (y1 - y0) * 0.04;
+  const padX = (x1 - x0) * 0.12;
+  y0 = Math.max(0, y0 - padY); y1 = Math.min(1, y1 + padY);
+  x0 = Math.max(0, x0 - padX); x1 = Math.min(1, x1 + padX);
+  const img = await loadImage(blob);
+  const sx = x0 * img.naturalWidth;
+  const sy = y0 * img.naturalHeight;
+  const sw = (x1 - x0) * img.naturalWidth;
+  const sh = (y1 - y0) * img.naturalHeight;
+  const scale = Math.min(1, 900 / Math.max(sw, sh));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(sw * scale);
+  canvas.height = Math.round(sh * scale);
+  canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  const out = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+  return out ? out.arrayBuffer() : null;
+}
+
+async function applyCrop(id, box) {
+  const w = await getWine(id);
+  const i = w?.photos.findIndex((p) => !p.lost);
+  if (!w || i < 0) return false;
+  const cropBytes = await cropToBox(photoBlob(w.photos[i]), box).catch(() => null);
+  if (!cropBytes) return false;
+  await updateWine(id, (cur) => ({ ...cur, photos: cur.photos.map((p, j) => (j === i ? { ...p, cropBytes } : p)) }));
+  return true;
+}
 
 // Converte le foto salvate come Blob dalla versione 0.1.0.
 async function migratePhotos() {
@@ -514,7 +557,8 @@ Usa ciò che è scritto; se un dato non è leggibile lascialo null. Non inventar
 Nazione: in italiano (Italia, Francia, Spagna…), dedotta anche da denominazione, lingua dell'etichetta o indirizzo del produttore.
 Colore: "orange" per i bianchi macerati sulle bucce ("macerato", "ramato", "amber", "skin contact").
 Stile: il più specifico; un Prosecco col fondo è "rifermentato in bottiglia / col fondo", un Franciacorta è "spumante metodo classico".
-In "campi_incerti" elenca le chiavi poco leggibili o dedotte.`;
+In "campi_incerti" elenca le chiavi poco leggibili o dedotte.
+In "riquadro_bottiglia" dai il riquadro della bottiglia intera (dal tappo al fondo) nella PRIMA immagine, come [ymin, xmin, ymax, xmax] in millesimi da 0 a 1000; null se la bottiglia non si vede intera.`;
 
 function fieldSchema(f) {
   if (f.type === 'ARRAY') return { type: 'ARRAY', items: { type: 'STRING' }, nullable: true };
@@ -525,6 +569,7 @@ function quickSchema() {
   const props = Object.fromEntries(QUICK.map((f) => [f.k, fieldSchema(f)]));
   props.campi_incerti = { type: 'ARRAY', items: { type: 'STRING' } };
   props.e_un_vino = { type: 'BOOLEAN' };
+  props.riquadro_bottiglia = { type: 'ARRAY', items: { type: 'INTEGER' }, nullable: true };
   return { type: 'OBJECT', properties: props, required: ['e_un_vino', 'campi_incerti'] };
 }
 
@@ -667,6 +712,19 @@ async function geminiFast(body, hooks, withImages) {
       hooks.log?.(`${hooks.label} · opzione non accettata`, `${JSON.stringify(extra)}: provo la successiva`);
     }
   }
+}
+
+async function geminiBox(blob, hooks) {
+  const out = await geminiFast({
+    contents: [{ role: 'user', parts: [
+      { text: 'Dai il riquadro della bottiglia di vino intera (dal tappo al fondo) nella foto, come [ymin, xmin, ymax, xmax] in millesimi da 0 a 1000. null se non si vede intera.' },
+      { inline_data: { mime_type: 'image/jpeg', data: await blobToBase64(blob) } },
+    ] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0, responseSchema: {
+      type: 'OBJECT', properties: { riquadro_bottiglia: { type: 'ARRAY', items: { type: 'INTEGER' }, nullable: true } },
+    } },
+  }, { ...hooks, label: 'Ritaglio bottiglia', model: readModel() }, true);
+  return JSON.parse(out.text).riquadro_bottiglia;
 }
 
 async function geminiQuick(blobs, hooks) {
@@ -863,7 +921,8 @@ async function recognize(id) {
     let current = wine;
     if (wine.status !== 'details') {
       enter('quick');
-      const { campi_incerti, e_un_vino, ...quick } = await geminiQuick(wine.photos.filter((p) => !p.lost).map(photoBlob), hooks);
+      const { campi_incerti, e_un_vino, riquadro_bottiglia, ...quick } = await geminiQuick(wine.photos.filter((p) => !p.lost).map(photoBlob), hooks);
+      if (riquadro_bottiglia) await applyCrop(id, riquadro_bottiglia);
       current = await updateWine(id, (w) => ({
         ...w,
         status: e_un_vino === false || !(quick.produttore || quick.nome) ? 'ok' : 'details',
@@ -975,6 +1034,7 @@ async function addFiles(files, sameWine) {
         edited: [],
         quantita: 1,
         posizione: '',
+        acquisto_data: todayIso(),
         photos,
       };
       await putWine(wine);
@@ -1054,9 +1114,24 @@ function listTitle(w) {
 function listSubtitle(w) {
   const d = w.data || {};
   const name = d.nome || d.denominazione || d.produttore;
-  return [d.produttore !== name && d.produttore, d.denominazione !== name && d.denominazione, d.colore, d.stile !== 'fermo' && d.stile, w.posizione]
+  return [d.produttore !== name && d.produttore, d.denominazione !== name && d.denominazione, w.posizione]
     .filter(Boolean).join(' · ');
 }
+
+// Colore come simbolo: calice pieno del colore del vino, flûte per le bollicine.
+const COLOR_NAMES = { rosso: 'Rosso', bianco: 'Bianco', rosato: 'Rosato', orange: 'Orange' };
+const isBubbly = (d) => /spumante|frizzante|rifermentato/.test(d?.stile || '');
+function colorIcon(d, size = 'sm') {
+  const c = COLOR_NAMES[d?.colore] ? d.colore : 'ignoto';
+  const title = [COLOR_NAMES[d?.colore] || 'Colore non indicato', isBubbly(d) && 'con bollicine'].filter(Boolean).join(', ');
+  const shape = isBubbly(d)
+    ? '<path class="wine" d="M9.5 3h5l-.6 9.2a1.9 1.9 0 0 1-3.8 0z"/><path class="glass" d="M12 14v6M9 21h6"/><circle class="bub" cx="11.4" cy="6.5" r=".7"/><circle class="bub" cx="12.7" cy="9" r=".6"/>'
+    : '<path class="wine" d="M6.5 8.5h11c0 4-2.4 6.2-5.5 6.2s-5.5-2.2-5.5-6.2z"/><path class="glass" d="M7 3h10c0 7-2 11.7-5 11.7S7 10 7 3zM12 14.7V20M8.5 21h7"/>';
+  return `<svg class="cicon ${size} c-${c}" viewBox="0 0 24 24" role="img" aria-label="${esc(title)}"><title>${esc(title)}</title>${shape}</svg>`;
+}
+
+// Prezzo mostrato: quello pagato se c'è, altrimenti la stima trovata sul web (con ~).
+const paidOrEstimate = (w) => (Number(w.prezzo_pagato) > 0 ? Number(w.prezzo_pagato) : Number(w.data?.prezzo) > 0 ? Number(w.data.prezzo) : null);
 
 // Stato rispetto alla finestra di consumo, solo per i vini con annata.
 function drinkState(d) {
@@ -1097,7 +1172,7 @@ const SORTS = {
   recenti: (a, b) => b.createdAt - a.createdAt,
   nome: (a, b) => listTitle(a).localeCompare(listTitle(b), 'it'),
   annata: byNumber((w) => w.data?.annata, 1),
-  prezzo: byNumber((w) => w.data?.prezzo, -1),
+  prezzo: byNumber((w) => paidOrEstimate(w), -1),
   bere: byNumber((w) => w.data?.annata && w.data?.bere_entro, 1),
   colore: (a, b) => {
     const i = (w) => { const n = COLOR_ORDER.indexOf(w.data?.colore); return n < 0 ? COLOR_ORDER.length : n; };
@@ -1125,8 +1200,67 @@ function scheduleRender() {
 let renderAfterSwipe = false;
 function scheduleRenderAfterSwipe() { renderAfterSwipe = true; }
 
+// ---------- Filtri ----------
+
+const FILTER_KEYS = ['colore', 'stato', 'zona', 'prezzo', 'negozio'];
+const PRICE_BANDS = { basso: ['fino a 15 €', 0, 15], medio: ['15–40 €', 15, 40], alto: ['oltre 40 €', 40, Infinity] };
+const STATE_NAMES = { ok: 'Pronto', soon: 'Da bere presto', wait: 'Da aspettare', over: 'Oltre', none: 'Senza finestra' };
+
+function loadFilters() {
+  try {
+    const f = JSON.parse(localStorage.getItem('cantina.filters') || '{}');
+    return Object.fromEntries(FILTER_KEYS.map((k) => [k, Array.isArray(f[k]) ? f[k] : []]));
+  } catch { return Object.fromEntries(FILTER_KEYS.map((k) => [k, []])); }
+}
+let filters = loadFilters();
+function saveFilters() {
+  try { localStorage.setItem('cantina.filters', JSON.stringify(filters)); } catch {}
+}
+const filterCount = () => FILTER_KEYS.reduce((n, k) => n + filters[k].length, 0);
+
+const wineZone = (w) => w.data?.regione || w.data?.nazione || '';
+const wineColor = (w) => (isBubbly(w.data) ? 'bollicine' : w.data?.colore || '');
+const wineState = (w) => drinkState(w.data)?.k || 'none';
+
+function passes(w, skip) {
+  const f = filters;
+  if (skip !== 'colore' && f.colore.length && !f.colore.includes(wineColor(w))) return false;
+  if (skip !== 'stato' && f.stato.length && !f.stato.includes(wineState(w))) return false;
+  if (skip !== 'zona' && f.zona.length && !f.zona.includes(wineZone(w))) return false;
+  if (skip !== 'negozio' && f.negozio.length && !f.negozio.includes(w.acquisto_luogo || '')) return false;
+  if (skip !== 'prezzo' && f.prezzo.length) {
+    const p = paidOrEstimate(w);
+    if (p == null || !f.prezzo.some((b) => p >= PRICE_BANDS[b][1] && p < PRICE_BANDS[b][2])) return false;
+  }
+  return true;
+}
+
+let lastWines = [];
+function renderFilters() {
+  const wines = lastWines.filter((w) => Number(w.quantita) > 0);
+  const chips = (k, options) => options.map(([v, label]) => {
+    const on = filters[k].includes(v);
+    return `<button type="button" class="chip${on ? ' on' : ''}" data-k="${k}" data-v="${esc(v)}">${label}</button>`;
+  }).join('');
+  const uniq = (get) => [...new Set(wines.map(get).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'it'));
+  const colors = [['rosso', 'Rosso'], ['bianco', 'Bianco'], ['rosato', 'Rosato'], ['orange', 'Orange'], ['bollicine', 'Bollicine']]
+    .filter(([v]) => filters.colore.includes(v) || wines.some((w) => wineColor(w) === v))
+    .map(([v, l]) => [v, `${colorIcon(v === 'bollicine' ? { stile: 'spumante', colore: 'bianco' } : { colore: v })}${l}`]);
+  const zones = uniq(wineZone);
+  const shops = uniq((w) => w.acquisto_luogo);
+  $('#filter-body').innerHTML = `
+    <span class="label">Colore</span><div class="chips">${chips('colore', colors)}</div>
+    <span class="label">Quando berlo</span><div class="chips">${chips('stato', Object.entries(STATE_NAMES).filter(([v]) => filters.stato.includes(v) || wines.some((w) => wineState(w) === v)))}</div>
+    ${zones.length ? `<span class="label">Provenienza</span><div class="chips">${chips('zona', zones.map((z) => [z, esc(z)]))}</div>` : ''}
+    <span class="label">Prezzo</span><div class="chips">${chips('prezzo', Object.entries(PRICE_BANDS).map(([v, b]) => [v, b[0]]))}</div>
+    ${shops.length ? `<span class="label">Comprato da</span><div class="chips">${chips('negozio', shops.map((z) => [z, esc(z)]))}</div>` : ''}`;
+  const shown = wines.filter((w) => passes(w)).length;
+  $('#btn-filter-apply').textContent = `Mostra ${shown} ${shown === 1 ? 'vino' : 'vini'}`;
+}
+
 async function render() {
   const wines = (await allWines()).sort(SORTS[sortKey()]);
+  lastWines = wines;
   releaseUrls('list');
   // Il registro della scheda aperta si aggiorna mentre il riconoscimento procede.
   if (editingId && $('#dlg-wine').open) {
@@ -1139,11 +1273,15 @@ async function render() {
     : wines;
   // I vini finiti restano nell'app (diario, ricerca) ma non nella cantina, se non si chiede di vederli.
   const finished = matching.filter((w) => !(Number(w.quantita) > 0));
-  const shown = q || showFinished ? matching : matching.filter((w) => Number(w.quantita) > 0);
+  const filtered = matching.filter((w) => passes(w));
+  const shown = q || showFinished ? filtered : filtered.filter((w) => Number(w.quantita) > 0);
+  const nf = filterCount();
+  $('#btn-filters').classList.toggle('on', nf > 0);
+  $('#filter-count').textContent = nf || '';
   const inCellar = wines.filter((w) => Number(w.quantita) > 0);
   const bottles = inCellar.reduce((n, w) => n + (Number(w.quantita) || 0), 0);
-  const priced = inCellar.filter((w) => Number(w.data?.prezzo) > 0);
-  const value = priced.reduce((n, w) => n + Number(w.data.prezzo) * (Number(w.quantita) || 0), 0);
+  const priced = inCellar.filter((w) => paidOrEstimate(w));
+  const value = priced.reduce((n, w) => n + paidOrEstimate(w) * (Number(w.quantita) || 0), 0);
   $('#usage').textContent = [
     `${bottles} ${bottles === 1 ? 'bottiglia' : 'bottiglie'}`,
     `${inCellar.length} vini`,
@@ -1151,14 +1289,15 @@ async function render() {
   ].filter(Boolean).join(' · ');
   $('#wine-list').innerHTML = shown.map((w) => {
     const state = drinkState(w.data);
-    const price = Number(w.data?.prezzo) > 0 ? formatPrice(w.data.prezzo) : '';
+    const p = paidOrEstimate(w);
+    const price = p ? `${Number(w.prezzo_pagato) > 0 ? '' : '~'}${formatPrice(p)}` : '';
     return `
     <li data-id="${w.id}" class="${Number(w.quantita) > 0 ? '' : 'finished'}">
       <div class="row-under">Bevuta</div>
       <div class="row">
         ${w.photos?.[0] ? imgTag(w.photos[0], thumbBlob, 'list') : `<span class="dot ${esc(w.data?.colore || '')}"></span>`}
         <div class="meta">
-          <strong>${esc(listTitle(w))}</strong>
+          <strong>${colorIcon(w.data)}${esc(listTitle(w))}</strong>
           <small>${esc(listSubtitle(w))}</small>
           ${wineBadges(w).map((b) => `<span class="badge">${esc(b)}</span>`).join('')}
         </div>
@@ -1168,7 +1307,7 @@ async function render() {
         </div>
       </div>
     </li>`;
-  }).join('') || `<li class="empty">${q ? 'Nessun vino trovato.' : 'Nessun vino in cantina. Tocca la fotocamera in basso per aggiungerne uno.'}</li>`;
+  }).join('') || `<li class="empty">${q || nf ? 'Nessun vino trovato con questa ricerca o questi filtri.' : 'Nessun vino in cantina. Tocca la fotocamera in basso per aggiungerne uno.'}</li>`;
   $('#btn-finished').hidden = q || !finished.length;
   $('#btn-finished').textContent = showFinished ? 'Nascondi i vini finiti' : `Mostra i vini finiti (${finished.length})`;
 
@@ -1181,11 +1320,49 @@ async function render() {
     noAi ? `${noAi} vini da riconoscere` : '',
   ].filter(Boolean).join(' · ');
   await renderDiary(wines);
+  renderVintages(wines);
+  if ($('#dlg-filters').open) renderFilters();
+}
+
+// ---------- Annate ----------
+
+function renderVintages(wines) {
+  const rows = wines.filter((w) => Number(w.quantita) > 0 && drinkState(w.data))
+    .map((w) => {
+      const d = w.data;
+      const from = Number(d.bere_dal) || null;
+      const to = Number(d.bere_entro) || null;
+      return { w, from: from || to - 3, to: to || from + 6, open: !to, state: drinkState(d) };
+    })
+    .sort((a, b) => a.to - b.to || a.from - b.from);
+  const missing = wines.filter((w) => Number(w.quantita) > 0 && !drinkState(w.data)).length;
+  const now = new Date().getFullYear() + new Date().getMonth() / 12;
+  if (!rows.length) {
+    $('#vintages').innerHTML = '<p class="hint empty">Ancora nessun vino con le date per berlo. Compaiono qui i vini con annata, quando la ricerca trova da quando e fino a quando berli.</p>';
+    $('#vintage-axis').innerHTML = '';
+    $('#vintage-summary').textContent = '';
+    return;
+  }
+  const lo = Math.floor(Math.min(now, ...rows.map((r) => r.from))) - 1;
+  const hi = Math.ceil(Math.max(now, ...rows.map((r) => r.to))) + 1;
+  const pos = (y) => `${((y - lo) / (hi - lo) * 100).toFixed(2)}%`;
+  const step = hi - lo > 24 ? 10 : 5;
+  const ticks = [];
+  for (let y = Math.ceil(lo / step) * step; y <= hi; y += step) if (Math.abs(y - now) > 1.6) ticks.push(y);
+  const soon = rows.filter((r) => r.state.k === 'soon').length;
+  const over = rows.filter((r) => r.state.k === 'over').length;
+  $('#vintage-summary').textContent = [`${rows.length} vini`, soon && `${soon} da bere presto`, over && `${over} oltre il momento migliore`, missing && `${missing} senza date`].filter(Boolean).join(' · ');
+  $('#vintages').innerHTML = rows.map((r) => `
+    <li data-id="${r.w.id}">
+      <div class="vname">${colorIcon(r.w.data)}<span><b>${esc(listTitle(r.w))}</b><small>${esc(r.w.data.produttore || '')} · ×${Number(r.w.quantita)}</small></span></div>
+      <div class="lane"><span class="bar ${r.state.k}${r.open ? ' open' : ''}" style="left:${pos(r.from)};width:calc(${pos(r.to)} - ${pos(r.from)})" title="${r.from}–${r.to}"></span><i class="now" style="left:${pos(now)}"></i></div>
+    </li>`).join('');
+  $('#vintage-axis').innerHTML = ticks.map((y) => `<span style="left:${pos(y)}">${y}</span>`).join('') + `<i class="now" style="left:${pos(now)}"><b>oggi</b></i>`;
 }
 
 // ---------- Viste ----------
 
-const VIEW_TITLES = { cellar: 'La mia cantina', diary: 'Diario' };
+const VIEW_TITLES = { cellar: 'La mia cantina', diary: 'Diario', vintages: 'Annate' };
 
 function showView(view) {
   for (const v of Object.keys(VIEW_TITLES)) $(`#view-${v}`).hidden = v !== view;
@@ -1464,9 +1641,13 @@ function renderWineHead(w) {
   $('#wine-sub').textContent = [d.produttore !== main && d.produttore, d.denominazione !== main && d.denominazione].filter(Boolean).join(' · ');
 
   $('#qty-out').textContent = Number(w.quantita) || 0;
-  const price = Number(d.prezzo) > 0 ? Number(d.prezzo) : null;
+  const price = paidOrEstimate(w);
+  const paid = Number(w.prezzo_pagato) > 0;
+  const bought = [w.acquisto_luogo, w.acquisto_data && new Date(w.acquisto_data + 'T12:00:00').toLocaleDateString('it-IT', { month: 'short', year: 'numeric' })].filter(Boolean).join(', ');
   $('#wine-kv').innerHTML = kvRows([
-    ['Prezzo', price && `${formatPrice(price)} a bottiglia${Number(w.quantita) > 1 ? ` · valore ${formatPrice(price * w.quantita)}` : ''}`],
+    ['Comprato', bought],
+    [paid ? 'Pagato' : 'Prezzo stimato', price && `${formatPrice(price)} a bottiglia${Number(w.quantita) > 1 ? ` · valore ${formatPrice(price * w.quantita)}` : ''}`],
+    ['Prezzo sul web', paid && Number(d.prezzo) > 0 && `~${formatPrice(d.prezzo)}`],
     ['Posizione', w.posizione],
     ['Aggiunto il', w.createdAt && new Date(w.createdAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })],
   ]);
@@ -1519,9 +1700,9 @@ const FIELD_GROUPS = [
   ['Caratteristiche', ['colore', 'stile', 'vitigni', 'gradazione', 'formato_ml', 'caratteristiche', 'affinamento']],
   ['Quando berlo', ['bere_dal', 'bere_entro', 'finestra_consumo']],
   ['In tavola', ['temperatura_servizio', 'abbinamenti', 'descrizione']],
-  ['In cantina', ['quantita', 'prezzo', 'posizione']],
+  ['In cantina', ['quantita', 'prezzo_pagato', 'acquisto_data', 'prezzo', 'acquisto_luogo', 'posizione']],
 ];
-const SHORT_FIELDS = new Set(['classificazione', 'annata', 'nazione', 'regione', 'colore', 'stile', 'gradazione', 'formato_ml', 'bere_dal', 'bere_entro', 'temperatura_servizio', 'quantita', 'prezzo']);
+const SHORT_FIELDS = new Set(['classificazione', 'annata', 'nazione', 'regione', 'colore', 'stile', 'gradazione', 'formato_ml', 'bere_dal', 'bere_entro', 'temperatura_servizio', 'quantita', 'prezzo', 'prezzo_pagato', 'acquisto_data']);
 const LONG_TEXT = new Set(['abbinamenti', 'descrizione', 'finestra_consumo', 'affinamento']);
 
 function autosize(t) {
@@ -1533,7 +1714,8 @@ async function openWine(id) {
   const w = await getWine(id);
   if (!w) return;
   editingId = id;
-  $('#wine-photos').innerHTML = w.photos.map((p) => imgTag(p, photoBlob, 'dialog')).join('');
+  $('#wine-photos').innerHTML = w.photos.map((p, i) => imgTag(p, i === 0 ? heroBlob : photoBlob, 'dialog')).join('');
+  $('#btn-crop').hidden = !settings.geminiKey || !w.photos.some((p) => !p.lost);
   const state = [];
   if (w.error) state.push('Errore: ' + w.error);
   if (w.uncertain?.length) state.push('Campi incerti evidenziati in giallo.');
@@ -1577,6 +1759,10 @@ async function openWine(id) {
   const field = (k) => {
     if (k === 'quantita') return input(k, 'Bottiglie', w.quantita, 'numeric');
     if (k === 'posizione') return input(k, 'Posizione in cantina', w.posizione);
+    if (k === 'prezzo_pagato') return input(k, 'Prezzo pagato (€)', w.prezzo_pagato, 'decimal');
+    if (k === 'acquisto_data') return `<label>Comprato il<input type="date" name="acquisto_data" value="${esc(w.acquisto_data || '')}"></label>`;
+    if (k === 'acquisto_luogo') return `<label class="span2">Comprato da (negozio, cantina, regalo…)<input name="acquisto_luogo" value="${esc(w.acquisto_luogo || '')}" list="opt-shops" autocomplete="off"><datalist id="opt-shops">${
+      [...new Set(lastWines.map((x) => x.acquisto_luogo).filter(Boolean))].map((x) => `<option value="${esc(x)}">`).join('')}</datalist></label>`;
     const f = byKey[k];
     return input(f.k, f.l, joinList(d[f.k]), f.type === 'INTEGER' ? 'numeric' : f.type === 'NUMBER' ? 'decimal' : '');
   };
@@ -1615,6 +1801,9 @@ function readForm(w) {
     uncertain: (w.uncertain || []).filter((k) => !edited.has(k)),
     quantita: Math.max(0, parseInt(fd.get('quantita'), 10) || 0),
     posizione: String(fd.get('posizione') || '').trim(),
+    acquisto_luogo: String(fd.get('acquisto_luogo') || '').trim(),
+    acquisto_data: String(fd.get('acquisto_data') || ''),
+    prezzo_pagato: (() => { const n = Number(String(fd.get('prezzo_pagato') || '').replace(',', '.')); return String(fd.get('prezzo_pagato') || '').trim() && Number.isFinite(n) ? n : null; })(),
   };
 }
 
@@ -1782,7 +1971,50 @@ function bindUi() {
     if ($('#dlg-same').returnValue) addFiles(importing, same);
     importing = [];
   });
-  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showView(t.dataset.view)));
+  document.querySelectorAll('.tab[data-view]').forEach((t) => t.addEventListener('click', () => showView(t.dataset.view)));
+  $('#btn-filters').addEventListener('click', () => { renderFilters(); $('#dlg-filters').showModal(); });
+  $('#filter-body').addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    const { k, v } = chip.dataset;
+    filters[k] = filters[k].includes(v) ? filters[k].filter((x) => x !== v) : [...filters[k], v];
+    saveFilters();
+    renderFilters();
+    scheduleRender();
+  });
+  $('#btn-filter-reset').addEventListener('click', () => {
+    filters = Object.fromEntries(FILTER_KEYS.map((k) => [k, []]));
+    saveFilters();
+    renderFilters();
+    scheduleRender();
+  });
+  $('#vintages').addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-id]');
+    if (li) openWine(li.dataset.id);
+  });
+  $('#btn-crop').addEventListener('click', async () => {
+    const id = editingId;
+    const w = await getWine(id);
+    const photo = w?.photos.find((p) => !p.lost);
+    if (!photo) return;
+    $('#btn-crop').disabled = true;
+    $('#btn-crop').textContent = 'Ritaglio in corso…';
+    try {
+      const box = await geminiBox(photoBlob(photo), {});
+      if (!(await applyCrop(id, box))) throw new Error('bottiglia non trovata intera nella foto');
+      toast('Foto ritagliata sulla bottiglia');
+      if (editingId === id) {
+        const cur = await getWine(id);
+        releaseUrls('dialog');
+        $('#wine-photos').innerHTML = cur.photos.map((p, i) => imgTag(p, i === 0 ? heroBlob : photoBlob, 'dialog')).join('');
+      }
+    } catch (err) {
+      toast('Ritaglio non riuscito: ' + err.message);
+    } finally {
+      $('#btn-crop').disabled = false;
+      $('#btn-crop').textContent = 'Ritaglia sulla bottiglia';
+    }
+  });
   $('#sort').value = sortKey();
   $('#sort').addEventListener('change', () => {
     try { localStorage.setItem('cantina.sort', $('#sort').value); } catch {}

@@ -205,7 +205,7 @@ footer button.link { font-size: inherit; }
 
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
-  display: grid; grid-template-columns: 1fr 72px 1fr; align-items: start;
+  display: grid; grid-template-columns: 1fr 1fr 68px 1fr 1fr; align-items: start;
   padding: 8px max(16px, env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 8px) max(16px, env(safe-area-inset-left));
   background: var(--card); border-top: 1px solid var(--line);
 }
@@ -374,3 +374,57 @@ dialog.sheet.with-bar::before { display: none; }
 #wine-fields fieldset { align-items: end; }
 #wine-fields label.uncertain input, #wine-fields label.uncertain textarea { background: var(--warn); }
 .wname:focus { outline: none; }
+
+/* ---------- Simbolo del colore ---------- */
+.cicon { width: 19px; height: 19px; flex: none; vertical-align: -3px; margin-right: 5px; }
+.cicon .glass { fill: none; stroke: #8d8183; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.cicon .wine { stroke: none; }
+.cicon .bub { fill: rgba(255, 255, 255, 0.75); }
+.c-rosso .wine { fill: #b8344c; }
+.c-bianco .wine { fill: #e3cd73; }
+.c-rosato .wine { fill: #ee9aa6; }
+.c-orange .wine { fill: #e0913f; }
+.c-ignoto .wine { fill: var(--line); }
+
+/* ---------- Ricerca e filtri ---------- */
+.search-row { display: flex; gap: 8px; }
+.search-row .searchbar { flex: 1; min-width: 0; }
+.filters-btn { display: flex; align-items: center; gap: 6px; background: var(--sunk); color: var(--fg); padding: 0 12px; border-radius: 11px; white-space: nowrap; }
+.filters-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.filters-btn.on { background: var(--wine-soft); color: var(--wine-text); }
+#filter-count:not(:empty) { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--wine); color: #fff; font-size: 0.72rem; display: grid; place-items: center; }
+#filter-body { display: flex; flex-direction: column; gap: 8px; }
+#filter-body .label { margin-top: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 99px; background: var(--sunk); border: 1px solid var(--line); font-size: 0.88rem; font-weight: 600; color: var(--fg); }
+.chip .cicon { margin-right: 5px; }
+.chip.on { background: var(--wine); border-color: var(--wine); color: #fff; }
+.chip.on .cicon .glass { stroke: #fff; }
+#dlg-filters .row h2 { font-size: 1.2rem; }
+
+/* ---------- Annate ---------- */
+.vintage-wrap { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 12px 8px; }
+#vintages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+#vintages li { display: grid; grid-template-columns: minmax(0, 42%) 1fr; gap: 10px; align-items: center; cursor: pointer; }
+.vname { display: flex; align-items: flex-start; min-width: 0; }
+.vname .cicon { margin-top: 2px; }
+.vname span { min-width: 0; }
+.vname b, .vname small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vname b { font-size: 0.88rem; font-weight: 650; }
+.vname small { font-size: 0.72rem; color: var(--muted); }
+.lane { position: relative; height: 14px; }
+.lane .bar { position: absolute; top: 2px; height: 10px; border-radius: 5px; min-width: 6px; background: var(--ok); }
+.lane .bar.wait { background: var(--wait); }
+.lane .bar.soon { background: var(--soon); }
+.lane .bar.over { background: var(--over); }
+.lane .bar.open { -webkit-mask-image: linear-gradient(90deg, #000 70%, transparent); mask-image: linear-gradient(90deg, #000 70%, transparent); }
+.lane .now { position: absolute; top: -6px; bottom: -6px; border-left: 1.5px dashed var(--fg); opacity: 0.6; }
+.vaxis { display: grid; grid-template-columns: minmax(0, 42%) 1fr; gap: 10px; margin-top: 8px; }
+#vintage-axis { position: relative; height: 16px; font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+#vintage-axis span { position: absolute; transform: translateX(-50%); }
+#vintage-axis .now { position: absolute; top: 0; border: none; }
+#vintage-axis .now b { position: absolute; top: 0; transform: translateX(-50%); font-size: 0.68rem; color: var(--fg); background: var(--card); padding: 0 3px; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.75rem; color: var(--muted); }
+.legend span { display: flex; align-items: center; gap: 5px; }
+.legend i { width: 12px; height: 6px; border-radius: 3px; display: inline-block; background: var(--ok); }
+.legend i.wait { background: var(--wait); } .legend i.soon { background: var(--soon); } .legend i.over { background: var(--over); }

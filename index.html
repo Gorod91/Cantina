@@ -20,7 +20,7 @@
 <body>
   <header>
     <h1 id="view-title">La mia cantina</h1>
-    <button id="btn-settings" class="icon-btn" aria-label="Impostazioni"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+
   </header>
 
   <main>
@@ -46,9 +46,14 @@
     </section>
 
     <section id="view-cellar">
-      <div class="searchbar">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
-        <input id="search" type="search" placeholder="Cerca vino, produttore, posizione…">
+      <div class="search-row">
+        <div class="searchbar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+          <input id="search" type="search" placeholder="Cerca">
+        </div>
+        <button type="button" id="btn-filters" class="filters-btn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"/></svg>Filtri<span id="filter-count"></span>
+        </button>
       </div>
       <p class="hint" id="usage"></p>
       <div class="sortbar">
@@ -69,6 +74,17 @@
       <p class="hint swipe-hint">Scorri un vino verso sinistra per segnarlo bevuto.</p>
     </section>
 
+    <section id="view-vintages" hidden>
+      <p class="hint" id="vintage-summary"></p>
+      <div class="vintage-wrap">
+        <ul id="vintages"></ul>
+        <div class="vaxis"><span></span><div id="vintage-axis"></div></div>
+      </div>
+      <div class="legend">
+        <span><i class="over"></i>Oltre</span><span><i class="soon"></i>Da bere presto</span><span><i class="ok"></i>Pronto</span><span><i class="wait"></i>Da aspettare</span>
+      </div>
+    </section>
+
     <section id="view-diary" hidden>
       <div class="quick">
         <button type="button" id="btn-drink-home">+ Bevuto a casa</button>
@@ -85,12 +101,18 @@
     <button type="button" class="tab on" data-view="cellar">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>Cantina
     </button>
+    <button type="button" class="tab" data-view="diary">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h11"/></svg>Diario
+    </button>
     <label class="shutter-btn" aria-label="Fotografa un vino">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h2l1.6-2h5.8l1.6 2h2A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.8"/></svg>
       <input id="in-camera" type="file" accept="image/*" multiple hidden>
     </label>
-    <button type="button" class="tab" data-view="diary">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h11"/></svg>Diario
+    <button type="button" class="tab" data-view="vintages">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M4 12h14M4 17h7"/><circle cx="18" cy="7" r="1.4"/></svg>Annate
+    </button>
+    <button type="button" class="tab" id="btn-settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Impostazioni
     </button>
   </nav>
   <input id="in-files" type="file" accept="image/*" multiple hidden>
@@ -103,6 +125,14 @@
         <button value="many">Vini diversi</button>
         <button value="same" class="primary">Stesso vino</button>
       </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-filters" class="sheet">
+    <form method="dialog">
+      <div class="row"><h2>Filtri</h2><button type="button" id="btn-filter-reset" class="link">Azzera</button></div>
+      <div id="filter-body"></div>
+      <div class="actions"><button value="ok" class="primary" id="btn-filter-apply">Mostra</button></div>
     </form>
   </dialog>
 
@@ -180,6 +210,7 @@
         <div class="actions">
           <button type="button" id="btn-google">Cerca su Google</button>
           <button type="button" id="btn-rerun">Riconosci di nuovo</button>
+          <button type="button" id="btn-crop">Ritaglia sulla bottiglia</button>
           <button type="button" id="btn-delete" class="danger">Elimina vino</button>
         </div>
         <details id="wine-debug" class="debug"><summary>Registro (debug)</summary><button type="button" id="btn-copy-log" class="small">Copia registro</button><div id="wine-log"></div></details>
