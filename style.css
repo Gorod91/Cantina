@@ -179,7 +179,3 @@ footer { text-align: center; color: var(--muted); font-size: 0.75rem; padding: 1
   font-size: 0.65rem;
   text-align: center;
 }
-
-.progress { margin-top: 6px; font-size: 0.8rem; color: var(--muted); }
-.progress b { display: block; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-bottom: 2px; }
-.progress i { display: block; height: 100%; background: var(--wine); transition: width 0.25s linear; }

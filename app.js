@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.1.4';
+const APP_VERSION = '0.2.0';
 
 // ---------- Impostazioni ----------
 
@@ -315,14 +315,14 @@ async function renamePhotos(id) {
 // ---------- Gemini ----------
 
 const FIELDS = [
-  { k: 'produttore', l: 'Produttore' },
-  { k: 'nome', l: 'Nome del vino' },
-  { k: 'denominazione', l: 'Denominazione' },
-  { k: 'classificazione', l: 'Classificazione (DOCG, DOC, IGT…)' },
-  { k: 'colore', l: 'Colore', options: ['rosso', 'bianco', 'rosato', 'orange'] },
-  { k: 'stile', l: 'Stile', options: ['fermo', 'frizzante', 'spumante metodo classico', 'spumante metodo Martinotti/Charmat', 'rifermentato in bottiglia / col fondo', 'passito', 'vendemmia tardiva', 'muffato', 'liquoroso/fortificato'] },
+  { k: 'produttore', quick: true, l: 'Produttore' },
+  { k: 'nome', quick: true, l: 'Nome del vino' },
+  { k: 'denominazione', quick: true, l: 'Denominazione' },
+  { k: 'classificazione', quick: true, l: 'Classificazione (DOCG, DOC, IGT…)' },
+  { k: 'colore', quick: true, l: 'Colore', options: ['rosso', 'bianco', 'rosato', 'orange'] },
+  { k: 'stile', quick: true, l: 'Stile', options: ['fermo', 'frizzante', 'spumante metodo classico', 'spumante metodo Martinotti/Charmat', 'rifermentato in bottiglia / col fondo', 'passito', 'vendemmia tardiva', 'muffato', 'liquoroso/fortificato'] },
   { k: 'caratteristiche', l: 'Caratteristiche (biologico, naturale…)', type: 'ARRAY' },
-  { k: 'annata', l: 'Annata', type: 'INTEGER' },
+  { k: 'annata', quick: true, l: 'Annata', type: 'INTEGER' },
   { k: 'vitigni', l: 'Vitigni', type: 'ARRAY' },
   { k: 'regione', l: 'Regione' },
   { k: 'nazione', l: 'Nazione' },
@@ -337,21 +337,24 @@ const FIELDS = [
 
 const OPTIONS = Object.fromEntries(FIELDS.filter((f) => f.options).map((f) => [f.k, f.options]));
 
-const PROMPT = `Sei un sommelier esperto. Le immagini mostrano l'etichetta (ed eventualmente la retroetichetta) di UNA bottiglia di vino.
-Estrai più informazioni possibili. Usa prima ciò che è scritto sull'etichetta; per i campi non scritti (vitigni, regione, temperatura di servizio, finestra di consumo, abbinamenti, descrizione) puoi usare la tua conoscenza del vino, ma solo se lo hai identificato con ragionevole sicurezza.
-Se un dato non è ricavabile lascialo null. Non inventare l'annata: se non è visibile è null.
-Colore: "orange" per i bianchi macerati sulle bucce (anche se l'etichetta dice "macerato", "ramato", "amber" o "skin contact"); il ramato di Pinot grigio è orange se macerato, altrimenti rosato.
-Stile: scegli il più specifico; un Prosecco col fondo è "rifermentato in bottiglia / col fondo", un Franciacorta è "spumante metodo classico", un Marsala o un Porto è "liquoroso/fortificato".
-Caratteristiche: solo se indicate o certe, per esempio biologico, biodinamico, naturale, senza solfiti aggiunti, non filtrato, vegano, dosaggio (brut nature, extra brut, brut, extra dry, dry, demi-sec, dolce), residuo zuccherino (secco, abboccato, amabile, dolce).
-In "campi_incerti" elenca le chiavi dei campi dedotti o poco leggibili. Rispondi in italiano.`;
+const QUICK = FIELDS.filter((f) => f.quick);
+const DETAILS = FIELDS.filter((f) => !f.quick);
 
-function geminiSchema() {
-  const props = {};
-  for (const f of FIELDS) {
-    props[f.k] = f.type === 'ARRAY'
-      ? { type: 'ARRAY', items: { type: 'STRING' }, nullable: true }
-      : { type: f.type || 'STRING', nullable: true, ...(f.options && { enum: f.options }) };
-  }
+// Primo passaggio: solo i dati che identificano il vino, per avere la scheda in pochi secondi.
+const QUICK_PROMPT = `Le immagini mostrano l'etichetta (ed eventualmente la retroetichetta) di UNA bottiglia di vino.
+Leggi solo: produttore, nome del vino, denominazione, classificazione (DOCG, DOC, IGT, IGP, AOC…), colore, stile, annata.
+Usa ciò che è scritto; se un dato non è leggibile lascialo null. Non inventare l'annata.
+Colore: "orange" per i bianchi macerati sulle bucce ("macerato", "ramato", "amber", "skin contact").
+Stile: il più specifico; un Prosecco col fondo è "rifermentato in bottiglia / col fondo", un Franciacorta è "spumante metodo classico".
+In "campi_incerti" elenca le chiavi poco leggibili o dedotte.`;
+
+function fieldSchema(f) {
+  if (f.type === 'ARRAY') return { type: 'ARRAY', items: { type: 'STRING' }, nullable: true };
+  return { type: f.type || 'STRING', nullable: true, ...(f.options && { enum: f.options }) };
+}
+
+function quickSchema() {
+  const props = Object.fromEntries(QUICK.map((f) => [f.k, fieldSchema(f)]));
   props.campi_incerti = { type: 'ARRAY', items: { type: 'STRING' } };
   props.e_un_vino = { type: 'BOOLEAN' };
   return { type: 'OBJECT', properties: props, required: ['e_un_vino', 'campi_incerti'] };
@@ -366,149 +369,132 @@ async function geminiCall(body) {
     body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error('Gemini ' + res.status + ': ' + (json.error?.message || 'errore'));
+  if (!res.ok) {
+    const err = new Error('Gemini ' + res.status + ': ' + (json.error?.message || 'errore'));
+    err.status = res.status;
+    throw err;
+  }
   const candidate = json.candidates?.[0];
   const text = candidate?.content?.parts?.filter((p) => !p.thought).map((p) => p.text || '').join('');
   if (!text) throw new Error('Gemini non ha restituito dati');
   return { text, grounding: candidate.groundingMetadata };
 }
 
-async function geminiRecognize(blobs) {
-  const parts = [{ text: PROMPT }];
-  for (const b of blobs) parts.push({ inline_data: { mime_type: 'image/jpeg', data: await blobToBase64(b) } });
-  const { text } = await geminiCall({
-    contents: [{ role: 'user', parts }],
-    generationConfig: { responseMimeType: 'application/json', responseSchema: geminiSchema(), temperature: 0.2 },
-  });
-  return JSON.parse(text);
-}
+// Opzioni per rispondere prima (niente ragionamento, immagini a risoluzione media).
+// Non tutti i modelli le accettano: in quel caso si riprova senza.
+const FAST_CONFIG = { thinkingConfig: { thinkingBudget: 0 }, mediaResolution: 'MEDIA_RESOLUTION_MEDIUM' };
+let fastConfigOk = true;
 
-// Campi che di solito non sono sull'etichetta e che la ricerca Google può correggere.
-const WEB_FIELDS = ['vitigni', 'regione', 'colore', 'stile', 'caratteristiche', 'affinamento', 'gradazione',
-  'temperatura_servizio', 'finestra_consumo', 'abbinamenti', 'descrizione'];
+async function geminiQuick(blobs) {
+  const parts = [{ text: QUICK_PROMPT }];
+  for (const b of blobs) parts.push({ inline_data: { mime_type: 'image/jpeg', data: await blobToBase64(b) } });
+  const config = { responseMimeType: 'application/json', responseSchema: quickSchema(), temperature: 0.1 };
+  const call = (extra) => geminiCall({ contents: [{ role: 'user', parts }], generationConfig: { ...config, ...extra } });
+  let out;
+  if (fastConfigOk) {
+    try {
+      out = await call(FAST_CONFIG);
+    } catch (e) {
+      if (e.status !== 400) throw e;
+      fastConfigOk = false;
+    }
+  }
+  out ??= await call({});
+  return JSON.parse(out.text);
+}
 
 function parseJsonText(text) {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
-  if (start < 0 || end < start) throw new Error('Risposta della ricerca non leggibile');
+  if (start < 0 || end < start) throw new Error('Risposta non leggibile');
   return JSON.parse(text.slice(start, end + 1));
 }
 
-// Seconda chiamata con ricerca Google: la ricerca non si può combinare con lo schema JSON
-// su tutti i modelli, quindi il JSON viene chiesto nel testo.
-async function geminiWebCheck(data) {
-  const who = [data.produttore, data.nome, data.denominazione, data.annata].filter(Boolean).join(', ');
-  const fields = WEB_FIELDS.map((k) => `"${k}"`).join(', ');
-  const prompt = `Cerca su Google la scheda tecnica di questo vino: ${who}.
-Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.
-Dati letti dall'etichetta (possono contenere errori di deduzione): ${JSON.stringify(data)}
-Rispondi SOLO con un oggetto JSON con le chiavi ${fields}, "vino_trovato" (true/false) e "confermati" (elenco delle chiavi che hai verificato su una fonte).
-"vitigni" e "caratteristiche" sono elenchi di stringhe; "gradazione" è un numero; una chiave non verificata vale null.
-Colore: uno tra ${OPTIONS.colore.join(', ')}. Stile: uno tra ${OPTIONS.stile.join(', ')}. Rispondi in italiano.`;
+// Secondo passaggio: con i dati univoci del vino cerca su Google e compila il resto.
+// La ricerca non si può combinare con lo schema JSON su tutti i modelli, quindi il JSON è chiesto nel testo.
+async function geminiDetails(data) {
+  const web = settings.webCheck !== 'no';
+  const who = QUICK.map((f) => data[f.k]).filter(Boolean).join(', ');
+  const keys = DETAILS.map((f) => `"${f.k}"`).join(', ');
+  const prompt = `${web ? 'Cerca su Google la scheda tecnica di questo vino' : 'Compila la scheda di questo vino'}: ${who}.
+${web ? "Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.\n" : ''}Rispondi SOLO con un oggetto JSON con le chiavi ${keys}, "vino_trovato" (true/false) e "confermati" (elenco delle chiavi verificate su una fonte).
+"vitigni" e "caratteristiche" sono elenchi di stringhe; "gradazione" è un numero; "formato_ml" è un intero. Un dato che non conosci con sicurezza vale null.
+Caratteristiche: solo se certe, per esempio biologico, biodinamico, naturale, senza solfiti aggiunti, non filtrato, dosaggio (brut nature, extra brut, brut…), residuo zuccherino (secco, amabile, dolce).
+"finestra_consumo" indica quando berlo per l'annata indicata; "descrizione" al massimo due frasi. Rispondi in italiano.`;
   const { text, grounding } = await geminiCall({
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    tools: [{ google_search: {} }],
+    ...(web && { tools: [{ google_search: {} }] }),
     generationConfig: { temperature: 0.1 },
   });
   const result = parseJsonText(text);
   const sources = (grounding?.groundingChunks || [])
     .map((c) => c.web).filter(Boolean)
     .map((w) => ({ title: w.title || w.uri, uri: w.uri }));
-  return { result, sources };
+  return { result, sources, web };
 }
 
-// ---------- Avanzamento ----------
+// Cosa sta facendo l'app per ogni vino, mostrato nella lista.
+const phases = new Map();
+const PHASE_TEXT = {
+  quick: 'Lettura etichetta…',
+  details: 'Ricerca dettagli su Google…',
+  detailsOffline: 'Compilazione dettagli…',
+};
 
-// Gemini non comunica l'avanzamento: la barra si basa sulla durata media delle ultime richieste.
-const DEFAULT_TIMINGS = { label: 8000, web: 15000 };
-const progress = new Map();
-
-function timings() {
-  try {
-    return { ...DEFAULT_TIMINGS, ...JSON.parse(localStorage.getItem('cantina.timings') || '{}') };
-  } catch {
-    return { ...DEFAULT_TIMINGS };
-  }
-}
-
-function recordTiming(phase, ms) {
-  const t = timings();
-  t[phase] = Math.round(t[phase] * 0.7 + ms * 0.3);
-  localStorage.setItem('cantina.timings', JSON.stringify(t));
-}
-
-async function timed(id, phase, fn) {
-  const start = Date.now();
-  progress.set(id, { phase, start, web: settings.webCheck !== 'no' });
-  tickProgress();
-  const out = await fn();
-  recordTiming(phase, Date.now() - start);
-  return out;
-}
-
-function progressInfo(id) {
-  const p = progress.get(id);
-  if (!p) return null;
-  const t = timings();
-  const total = t.label + (p.web ? t.web : 0);
-  const done = (p.phase === 'web' ? t.label : 0) + (Date.now() - p.start);
-  const left = Math.max(1, Math.round((total - done) / 1000));
-  const label = p.phase === 'web' ? 'Verifica su Google' : 'Lettura etichetta';
-  const step = p.web ? (p.phase === 'web' ? ' (2/2)' : ' (1/2)') : '';
-  return {
-    pct: Math.min(95, Math.round((done / total) * 100)),
-    text: done < total ? `${label}${step}… circa ${left} s` : `${label}${step}… quasi fatto`,
-  };
-}
-
-let ticker = null;
-function tickProgress() {
-  for (const el of document.querySelectorAll('.progress[data-id]')) {
-    const info = progressInfo(el.dataset.id);
-    if (!info) continue;
-    el.querySelector('i').style.width = info.pct + '%';
-    el.querySelector('span').textContent = info.text;
-  }
-  if (progress.size && !ticker) ticker = setInterval(tickProgress, 250);
-  if (!progress.size && ticker) { clearInterval(ticker); ticker = null; }
+function setPhase(id, phase) {
+  if (phase) phases.set(id, phase);
+  else phases.delete(id);
+  scheduleRender();
 }
 
 async function recognize(id) {
   if (!settings.geminiKey) return;
   const wine = await getWine(id);
-  await updateWine(id, { status: 'recognizing', error: null });
   try {
-    const result = await timed(id, 'label', () => geminiRecognize(wine.photos.filter((p) => !p.lost).map(photoBlob)));
-    const { campi_incerti, e_un_vino, ...data } = result;
-    let uncertain = campi_incerti || [];
-    let web = null;
-    if (settings.webCheck !== 'no' && e_un_vino !== false && (data.produttore || data.nome)) {
-      try {
-        const { result: found, sources } = await timed(id, 'web', () => geminiWebCheck(data));
-        const confirmed = new Set(found.vino_trovato === false ? [] : found.confermati || []);
-        for (const k of WEB_FIELDS) {
-          if (confirmed.has(k) && found[k] != null && found[k] !== '') data[k] = found[k];
-        }
-        uncertain = uncertain.filter((k) => !confirmed.has(k));
-        web = { found: found.vino_trovato !== false, confirmed: [...confirmed], sources, at: Date.now() };
-      } catch (e) {
-        web = { error: e.message, at: Date.now() };
-      }
+    let current = wine;
+    if (wine.status !== 'details') {
+      setPhase(id, 'quick');
+      const { campi_incerti, e_un_vino, ...quick } = await geminiQuick(wine.photos.filter((p) => !p.lost).map(photoBlob));
+      current = await updateWine(id, (w) => ({
+        ...w,
+        status: e_un_vino === false || !(quick.produttore || quick.nome) ? 'ok' : 'details',
+        data: { ...(w.data || {}), ...quick, ...pickUserEdits(w) },
+        uncertain: campi_incerti || [],
+        notWine: e_un_vino === false,
+        web: null,
+        error: null,
+      }));
+      renamePhotos(id);
+      if (current.status === 'ok') return;
     }
-    await updateWine(id, {
-      status: 'ok',
-      data: { ...data, ...pickUserEdits(wine) },
-      uncertain,
-      web,
-      notWine: e_un_vino === false,
-      error: null,
-    });
-    await renamePhotos(id);
+    setPhase(id, settings.webCheck !== 'no' ? 'details' : 'detailsOffline');
+    try {
+      const { result, sources, web } = await geminiDetails(current.data);
+      const confirmed = new Set(result.vino_trovato === false ? [] : result.confermati || []);
+      await updateWine(id, (w) => {
+        const data = { ...w.data };
+        const uncertain = new Set(w.uncertain || []);
+        for (const f of DETAILS) {
+          const v = result[f.k];
+          if (v == null || v === '' || (Array.isArray(v) && !v.length)) continue;
+          data[f.k] = v;
+          if (!confirmed.has(f.k)) uncertain.add(f.k);
+        }
+        return {
+          ...w,
+          status: 'ok',
+          data: { ...data, ...pickUserEdits(w) },
+          uncertain: [...uncertain],
+          web: web ? { found: result.vino_trovato !== false, confirmed: [...confirmed], sources, at: Date.now() } : null,
+        };
+      });
+    } catch (e) {
+      await updateWine(id, { status: 'ok', web: { error: e.message, at: Date.now() } });
+    }
   } catch (e) {
     await updateWine(id, { status: 'error', error: e.message });
   } finally {
-    progress.delete(id);
-    tickProgress();
+    setPhase(id, null);
   }
 }
 
@@ -613,19 +599,13 @@ function wineSubtitle(w) {
 
 function wineBadges(w) {
   const b = [];
-  if (w.status === 'new' && settings.geminiKey && !progress.has(w.id)) b.push('In coda…');
+  if (phases.has(w.id)) b.push(PHASE_TEXT[phases.get(w.id)]);
+  else if (['new', 'details'].includes(w.status) && settings.geminiKey) b.push('In coda…');
   if (w.status === 'new' && !settings.geminiKey) b.push('Da riconoscere');
   if (w.status === 'error') b.push('Errore Gemini');
   if (w.notWine) b.push('Non sembra un vino');
   if (w.photos.some((p) => !p.driveId)) b.push('Drive in attesa');
   return b;
-}
-
-function progressBar(id) {
-  const info = progressInfo(id);
-  return info
-    ? `<div class="progress" data-id="${id}"><b><i style="width:${info.pct}%"></i></b><span>${esc(info.text)}</span></div>`
-    : '';
 }
 
 let renderQueued = false;
@@ -651,7 +631,6 @@ async function render() {
         <strong>${esc(wineTitle(w))}</strong>
         <small>${esc(wineSubtitle(w))}</small>
         <small>${w.quantita} bott.${w.posizione ? ' · ' + esc(w.posizione) : ''}</small>
-        ${progressBar(w.id)}
         ${wineBadges(w).map((b) => `<span class="badge">${esc(b)}</span>`).join('')}
       </div>
     </li>`).join('') || '<li class="empty">Nessun vino. Scatta o importa una foto per iniziare.</li>';
