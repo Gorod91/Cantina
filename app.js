@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.7.3';
+const APP_VERSION = '0.7.4';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.7.4', notes: ['Etichetta prima del web: vitigni, gradazione, formato, regione e caratteristiche stampati in etichetta o retroetichetta vengono letti dalla foto e il web non li sovrascrive, li completa solo se mancano.', 'Dopo "Unisci" il vino viene riletto con tutte le foto insieme.'] },
   { v: '0.7.3', notes: ['Eliminare più vini: "Seleziona" sopra la lista, tocca i vini e poi Elimina. Nella scheda del vino il pulsante Elimina è in vista, non più dentro Modifica.'] },
   { v: '0.7.2', notes: ['Scheda del vino: se ha più foto (fronte e retro) si vedono tutte in alto, affiancate.'] },
   { v: '0.7.1', notes: ['Raggruppa le foto: niente più proposta automatica di Gemini, le foto dello stesso vino si mettono insieme a mano con un tocco.'] },
@@ -539,13 +540,13 @@ const FIELDS = [
   { k: 'classificazione', quick: true, l: 'Classificazione' },
   { k: 'colore', quick: true, l: 'Colore', options: ['rosso', 'bianco', 'rosato', 'orange'] },
   { k: 'stile', quick: true, l: 'Stile', options: ['fermo', 'frizzante', 'spumante metodo classico', 'spumante metodo Martinotti/Charmat', 'rifermentato in bottiglia / col fondo', 'passito', 'vendemmia tardiva', 'muffato', 'liquoroso/fortificato'] },
-  { k: 'caratteristiche', l: 'Caratteristiche (biologico, naturale…)', type: 'ARRAY' },
+  { k: 'caratteristiche', label: true, l: 'Caratteristiche (biologico, naturale…)', type: 'ARRAY' },
   { k: 'annata', quick: true, l: 'Annata', type: 'INTEGER' },
   { k: 'nazione', quick: true, l: 'Nazione' },
-  { k: 'vitigni', l: 'Vitigni', type: 'ARRAY' },
-  { k: 'regione', l: 'Regione' },
-  { k: 'gradazione', l: 'Gradazione (% vol)', type: 'NUMBER' },
-  { k: 'formato_ml', l: 'Formato (ml)', type: 'INTEGER' },
+  { k: 'vitigni', label: true, l: 'Vitigni', type: 'ARRAY' },
+  { k: 'regione', label: true, l: 'Regione' },
+  { k: 'gradazione', label: true, l: 'Gradazione (% vol)', type: 'NUMBER' },
+  { k: 'formato_ml', label: true, l: 'Formato (ml)', type: 'INTEGER' },
   { k: 'affinamento', l: 'Affinamento' },
   { k: 'temperatura_servizio', l: 'Temperatura di servizio' },
   { k: 'bere_dal', l: 'Da bere dal (anno)', type: 'INTEGER', drink: true },
@@ -560,10 +561,13 @@ const OPTIONS = Object.fromEntries(FIELDS.filter((f) => f.options).map((f) => [f
 
 const QUICK = FIELDS.filter((f) => f.quick);
 const DETAILS = FIELDS.filter((f) => !f.quick);
+// Dati che spesso sono stampati in etichetta: se la foto li mostra valgono quelli, il web li completa solo se mancano.
+const LABEL = FIELDS.filter((f) => f.label);
 
 // Primo passaggio: solo i dati che identificano il vino, per avere la scheda in pochi secondi.
 const QUICK_PROMPT = `Le immagini mostrano l'etichetta (ed eventualmente la retroetichetta) di UNA bottiglia di vino.
 Leggi solo: produttore, nome del vino, denominazione, classificazione (DOCG, DOC, IGT, IGP, AOC…), colore, stile, annata, nazione.
+Se sono stampati sull'etichetta o sulla retroetichetta leggi anche: vitigni (con le percentuali se indicate, per esempio "Sangiovese 90%"), gradazione (% vol, numero), formato_ml (750, 1500…), regione, caratteristiche (biologico, biodinamico, non filtrato, dosaggio come brut o extra brut…). Questi solo se sono scritti; altrimenti null.
 Usa ciò che è scritto; se un dato non è leggibile lascialo null. Non inventare l'annata.
 Nazione: in italiano (Italia, Francia, Spagna…), dedotta anche da denominazione, lingua dell'etichetta o indirizzo del produttore.
 Colore: "orange" per i bianchi macerati sulle bucce ("macerato", "ramato", "amber", "skin contact").
@@ -577,7 +581,7 @@ function fieldSchema(f) {
 }
 
 function quickSchema() {
-  const props = Object.fromEntries(QUICK.map((f) => [f.k, fieldSchema(f)]));
+  const props = Object.fromEntries([...QUICK, ...LABEL].map((f) => [f.k, fieldSchema(f)]));
   props.campi_incerti = { type: 'ARRAY', items: { type: 'STRING' } };
   props.e_un_vino = { type: 'BOOLEAN' };
   props.riquadro_bottiglia = { type: 'ARRAY', items: { type: 'INTEGER' }, nullable: true };
@@ -933,12 +937,18 @@ async function recognize(id) {
     if (wine.status !== 'details') {
       enter('quick');
       const { campi_incerti, e_un_vino, riquadro_bottiglia, ...quick } = await geminiQuick(wine.photos.filter((p) => !p.lost).map(photoBlob), hooks);
+      const fromLabel = LABEL.map((f) => f.k).filter((k) => {
+        const v = quick[k];
+        if (v == null || v === '' || (Array.isArray(v) && !v.length)) { delete quick[k]; return false; }
+        return !(campi_incerti || []).includes(k);
+      });
       if (riquadro_bottiglia) await applyCrop(id, riquadro_bottiglia);
       current = await updateWine(id, (w) => ({
         ...w,
         status: e_un_vino === false || !(quick.produttore || quick.nome) ? 'ok' : 'details',
         data: { ...(w.data || {}), ...quick, ...pickUserEdits(w) },
         uncertain: campi_incerti || [],
+        fromLabel,
         notWine: e_un_vino === false,
         web: null,
         error: null,
@@ -967,8 +977,10 @@ async function recognize(id) {
       await updateWine(id, (w) => {
         const data = { ...w.data };
         const uncertain = new Set(w.uncertain || []);
+        const fromLabel = new Set(w.fromLabel || []);
         for (const f of DETAILS) {
           if (f.drink && !data.annata) continue;
+          if (fromLabel.has(f.k)) continue;
           const v = result[f.k];
           if (v == null || v === '' || (Array.isArray(v) && !v.length)) continue;
           data[f.k] = v;
@@ -2191,8 +2203,12 @@ function bindUi() {
     const twin = $('#btn-merge').dataset.twin;
     $('#dlg-wine').close();
     const kept = await mergeWines(id, twin);
-    toast('Vini uniti: bottiglie, foto e bevute ora sono in un\'unica scheda.');
-    if (kept) openWine(kept);
+    if (!kept) return;
+    // Si rilegge il vino con tutte le foto insieme: il retro di uno può completare il fronte dell'altro.
+    await updateWine(kept, { status: 'new' });
+    processWine(kept);
+    toast('Vini uniti: bottiglie, foto e bevute ora sono in un\'unica scheda. Rileggo le etichette.');
+    openWine(kept);
   });
   $('#btn-not-twin').addEventListener('click', async () => {
     const id = editingId;
