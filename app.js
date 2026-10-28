@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.4';
+const APP_VERSION = '0.3.5';
 
 // ---------- Impostazioni ----------
 
@@ -347,6 +347,7 @@ const FIELDS = [
   { k: 'affinamento', l: 'Affinamento' },
   { k: 'temperatura_servizio', l: 'Temperatura di servizio' },
   { k: 'finestra_consumo', l: 'Quando berlo (stima)' },
+  { k: 'prezzo', l: 'Prezzo stimato a bottiglia (€)', type: 'NUMBER' },
   { k: 'abbinamenti', l: 'Abbinamenti' },
   { k: 'descrizione', l: 'Descrizione' },
 ];
@@ -589,14 +590,14 @@ async function geminiDetails(data, hooks, mode) {
 Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.`;
   } else if (mode === 'tavily') {
     const query = ['produttore', 'nome', 'denominazione', 'annata'].map((k) => data[k]).filter(Boolean).join(' ');
-    sources = await tavilySearch(`${query} scheda tecnica`, hooks.log, hooks.cost);
+    sources = await tavilySearch(`${query} scheda tecnica prezzo`, hooks.log, hooks.cost);
     intro = `Compila la scheda di questo vino: ${who}.
 Usa i risultati di ricerca qui sotto, preferendo il sito del produttore. Se riguardano un altro vino o un'altra annata, tienine conto.
 ${sources.map((r, n) => `[${n + 1}] ${r.title} (${r.uri})\n${r.content}`).join('\n\n') || '(nessun risultato)'}`;
   }
   const prompt = `${intro}
 Rispondi SOLO con un oggetto JSON con le chiavi ${keys}, "vino_trovato" (true/false) e "confermati" (elenco delle chiavi verificate su una fonte${mode === 'none' ? '; senza fonti è vuoto' : ''}).
-"vitigni" e "caratteristiche" sono elenchi di stringhe; "gradazione" è un numero; "formato_ml" è un intero. Un dato che non conosci con sicurezza vale null.
+"vitigni" e "caratteristiche" sono elenchi di stringhe; "gradazione" è un numero; "prezzo" è il prezzo medio in euro di una bottiglia da 0,75 l di questa annata in enoteca o negozio online in Italia (numero; una stima ragionevole va bene anche senza fonte esatta); "formato_ml" è un intero. Un dato che non conosci con sicurezza vale null.
 Caratteristiche: solo se certe, per esempio biologico, biodinamico, naturale, senza solfiti aggiunti, non filtrato, dosaggio (brut nature, extra brut, brut…), residuo zuccherino (secco, amabile, dolce).
 "finestra_consumo" indica quando berlo per l'annata indicata; "descrizione" al massimo due frasi. Rispondi in italiano.`;
   const { text, grounding } = await geminiFast({
@@ -818,9 +819,11 @@ function wineTitle(w) {
   return [d.produttore, d.nome].filter(Boolean).join(' · ') || 'Vino senza nome';
 }
 
+const formatPrice = (eur) => Number(eur).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: eur >= 100 ? 0 : 2 });
+
 function wineSubtitle(w) {
   const d = w.data || {};
-  return [d.denominazione, d.annata, d.colore || d.tipologia, d.stile !== 'fermo' && d.stile].filter(Boolean).join(' · ');
+  return [d.denominazione, d.annata, d.colore || d.tipologia, d.stile !== 'fermo' && d.stile, d.prezzo && `~${formatPrice(d.prezzo)}`].filter(Boolean).join(' · ');
 }
 
 function wineBadges(w) {
@@ -855,9 +858,10 @@ async function render() {
     : wines;
   const bottles = wines.reduce((n, w) => n + (Number(w.quantita) || 0), 0);
   $('#count').textContent = `(${wines.length} vini, ${bottles} bottiglie)`;
-  const u = monthUsage();
-  $('#usage').textContent = u.gemini || u.tavily
-    ? `Questo mese: ${u.gemini} richieste Gemini, ${u.tavily}/1000 ricerche Tavily${u.google ? `, ${u.google} ricerche Google` : ''} · costo stimato a pagamento ${formatEur(u.usd)} (piano gratuito: 0 €)`
+  const priced = wines.filter((w) => Number(w.data?.prezzo) > 0);
+  const value = priced.reduce((n, w) => n + Number(w.data.prezzo) * (Number(w.quantita) || 0), 0);
+  $('#usage').textContent = value
+    ? `Valore stimato della cantina: ${formatPrice(value)}${priced.length < wines.length ? ` (prezzo noto per ${priced.length} vini su ${wines.length})` : ''}`
     : '';
   $('#wine-list').innerHTML = shown.map((w) => `
     <li data-id="${w.id}">
@@ -886,10 +890,10 @@ function logText(w) {
   return (w.log || []).map((e) => `[${new Date(e.at).toLocaleTimeString('it-IT')}] ${e.step}${e.text ? '\n' + e.text : ''}`).join('\n\n');
 }
 
-function renderLog(w) {
-  $('#wine-log').innerHTML = (w.log || []).length
+function renderLog(w, note = '') {
+  $('#wine-log').innerHTML = (note ? `<p class="hint">${esc(note)}</p>` : '') + ((w.log || []).length
     ? w.log.map((e) => `<div class="log-entry"><b>${esc(new Date(e.at).toLocaleTimeString('it-IT'))} · ${esc(e.step)}</b>${e.text ? `<pre>${esc(e.text)}</pre>` : ''}</div>`).join('')
-    : '<p class="hint">Nessun registro: tocca "Riconosci di nuovo" per generarlo.</p>';
+    : '<p class="hint">Nessun registro: tocca "Riconosci di nuovo" per generarlo.</p>');
 }
 
 async function openWine(id) {
@@ -909,11 +913,12 @@ async function openWine(id) {
     else if (!w.web.found) state.push(`Vino non trovato con la ricerca ${where}.`);
     else state.push(`Verificati con ${where}: ${w.web.confirmed.join(', ') || 'nessun campo'}.`);
   }
+  const apiCost = [];
   if (w.costs?.length) {
     const last = w.costs.reduce((n, c) => n + c.usd, 0);
     const parts = w.costs.map((c) => `${c.step.replace(/ \(.*\)/, '')} ${c.model === 'tavily' && !c.usd ? 'gratis' : formatEur(c.usd)}`).join(' · ');
     const total = w.spentUsd > last + 1e-9 ? ` Totale per questo vino: ${formatEur(w.spentUsd)}.` : '';
-    state.push(`Costo stimato a pagamento: ${formatEur(last)} (${parts}); sul piano gratuito 0 €.${total}`);
+    apiCost.push(`Costo API stimato a pagamento: ${formatEur(last)} (${parts}); sul piano gratuito 0 €.${total}`);
   }
   w.photos.forEach((p, i) => p.error && state.push(`Foto ${i + 1}: ${p.error}`));
   $('#wine-state').innerHTML = esc(state.join(' ')) + (w.web?.sources?.length
@@ -933,7 +938,7 @@ async function openWine(id) {
     `<div class="grid2">${input('quantita', 'Bottiglie', w.quantita, 'numeric')}${input('posizione', 'Posizione in cantina', w.posizione)}</div>` +
     FIELDS.map((f) => input(f.k, f.l, Array.isArray(d[f.k]) ? d[f.k].join(', ') : d[f.k],
       f.type === 'INTEGER' ? 'numeric' : f.type === 'NUMBER' ? 'decimal' : '')).join('');
-  renderLog(w);
+  renderLog(w, apiCost.join(''));
   $('#dlg-wine').returnValue = '';
   $('#dlg-wine').showModal();
 }
