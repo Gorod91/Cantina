@@ -252,6 +252,18 @@
   <dialog id="dlg-settings" class="sheet">
     <form method="dialog" id="settings-form">
       <h2>Impostazioni</h2>
+      <section class="cellars">
+        <span class="label">Cantine</span>
+        <div id="cellar-list"></div>
+        <div id="share-box">
+          <label>Condividi la tua cantina (email Google di chi la vede e la modifica)
+            <input id="share-email" type="email" autocomplete="off" autocapitalize="off" placeholder="nome@gmail.com">
+          </label>
+          <button type="button" id="btn-share">Condividi</button>
+        </div>
+        <button type="button" id="btn-join">Aggiungi una cantina condivisa con te</button>
+        <button type="button" id="btn-leave" class="danger" hidden>Togli questa cantina da questo dispositivo</button>
+      </section>
       <label>Chiave API Gemini
         <input name="geminiKey" type="password" autocomplete="off" placeholder="AIza…">
       </label>

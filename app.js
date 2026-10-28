@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.9.1';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.9.1', notes: ['Cantine condivise (in prova): in Impostazioni → Cantine puoi condividere la tua cantina con un\'email Google e passare da una cantina all\'altra. Chi la riceve la aggiunge con "Aggiungi una cantina condivisa con te".'] },
   { v: '0.9.0', notes: ['Tappa 3, sincronizzazione: con Drive collegato, cantina, diario ed eliminazioni restano uguali su tutti i tuoi dispositivi. Si sincronizza a ogni modifica, quando riapri l\'app e ogni due minuti; se lo stesso vino è stato modificato in due posti vale la modifica più recente.', 'Le foto aggiunte su un altro dispositivo vengono scaricate da Drive, con miniatura e ritaglio.', 'Chiavi Gemini e Tavily e modelli scelti passano da soli agli altri tuoi dispositivi (file cantina-impostazioni.json su Drive).'] },
   { v: '0.8.0', notes: ['Versione per PC (finestra larga almeno 1000 px): barra laterale, lista a colonne ordinabile toccando le intestazioni, scheda del vino fissa a destra (cliccando un altro vino si salva e passa a quello), foto trascinabili sulla finestra, / per cercare, Esc per chiudere la scheda.'] },
   { v: '0.7.6', notes: ['Fronte e retro con la fotocamera: dopo la foto tocca l\'avviso "fotografa anche il retro". Nella scheda del vino c\'è "Aggiungi foto". Il vino viene riletto con tutte le foto.'] },
@@ -120,11 +121,21 @@ function saveSettings(next) {
 
 // ---------- Database locale (IndexedDB) ----------
 
-const DB_NAME = 'cantina';
+// ---------- Cantine ----------
+
+// La tua cantina usa i database "cantina" e "cantina-bevute" e la tua cartella su Drive.
+// Ogni cantina condivisa con te ha database suoi ("…@id della cartella") e la cartella scelta con il Picker di Google.
+function cellars() {
+  try { return JSON.parse(localStorage.getItem('cantina.cellars') || '[]'); } catch { return []; }
+}
+const currentCellar = cellars().find((c) => c.id === localStorage.getItem('cantina.cellar')) || null;
+const cellarKey = (k) => (currentCellar ? `${k}@${currentCellar.id}` : k);
+
+const DB_NAME = cellarKey('cantina');
 const STORE = 'wines';
 // Le bevute (il Diario) stanno in un database a parte: aggiungere una tabella a "cantina" richiedeva
 // di alzarne la versione, e su iPhone l'aggiornamento restava bloccato finché una vecchia copia dell'app era aperta.
-const DRINKS_DB = 'cantina-bevute';
+const DRINKS_DB = cellarKey('cantina-bevute');
 const DRINKS = 'drinks';
 const dbPromises = new Map();
 
@@ -425,6 +436,7 @@ async function driveFetch(url, opts = {}) {
 let folderPromise = null;
 
 function driveFolderId() {
+  if (currentCellar) return Promise.resolve(currentCellar.id);
   folderPromise ??= findOrCreateFolder().catch((e) => {
     folderPromise = null;
     throw e;
@@ -434,7 +446,7 @@ function driveFolderId() {
 
 async function findOrCreateFolder() {
   const name = settings.driveFolder || 'Cantina';
-  const q = `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const q = `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'me' in owners`;
   const found = await driveFetch('https://www.googleapis.com/drive/v3/files?fields=files(id)&orderBy=createdTime&q=' + encodeURIComponent(q));
   const [first, ...dupes] = found.files || [];
   if (!first) {
@@ -557,14 +569,14 @@ const DRIVE_FILES = 'https://www.googleapis.com/drive/v3/files';
 
 function tombstones() {
   try {
-    const t = JSON.parse(localStorage.getItem('cantina.deleted') || '{}');
+    const t = JSON.parse(localStorage.getItem(cellarKey('cantina.deleted')) || '{}');
     return { wines: t.wines || {}, drinks: t.drinks || {} };
   } catch {
     return { wines: {}, drinks: {} };
   }
 }
 function saveTombstones(t) {
-  try { localStorage.setItem('cantina.deleted', JSON.stringify(t)); } catch {}
+  try { localStorage.setItem(cellarKey('cantina.deleted'), JSON.stringify(t)); } catch {}
 }
 function addTombstone(kind, id) {
   const t = tombstones();
@@ -572,7 +584,7 @@ function addTombstone(kind, id) {
   saveTombstones(t);
 }
 
-const sync = { timer: null, running: null, again: false, at: Number(localStorage.getItem('cantina.syncedAt')) || 0, error: null };
+const sync = { timer: null, running: null, again: false, at: Number(localStorage.getItem(cellarKey('cantina.syncedAt'))) || 0, error: null };
 
 function syncSoon(ms = 3000) {
   if (!driveToken()) return;
@@ -586,7 +598,7 @@ function syncNow() {
   clearTimeout(sync.timer);
   updateSyncStatus(true);
   sync.running = runSync()
-    .then(() => { sync.error = null; sync.at = Date.now(); localStorage.setItem('cantina.syncedAt', String(sync.at)); })
+    .then(() => { sync.error = null; sync.at = Date.now(); localStorage.setItem(cellarKey('cantina.syncedAt'), String(sync.at)); })
     .catch((e) => { sync.error = e.message; diag(`Sincronizzazione non riuscita: ${e.message}`, false); })
     .finally(() => {
       sync.running = null;
@@ -684,7 +696,7 @@ async function mergeList(kind, remoteList, deleted, { all, get, put, remove, fro
 async function runSync() {
   const folder = await driveFolderId();
   let cached = null;
-  try { cached = JSON.parse(localStorage.getItem('cantina.syncFile') || 'null'); } catch {}
+  try { cached = JSON.parse(localStorage.getItem(cellarKey('cantina.syncFile')) || 'null'); } catch {}
   let fileId = cached?.folder === folder ? cached.id : await driveFindFile(SYNC_FILE, folder);
   let remote = null;
   if (fileId) {
@@ -724,7 +736,7 @@ async function runSync() {
   };
   const same = JSON.stringify(out) === JSON.stringify({ app: 'cantina', formato: 1, wines: byId(remote.wines || []), drinks: byId(remote.drinks || []), deleted: remote.deleted || {} });
   if (!same) fileId = await driveWriteJson(fileId, SYNC_FILE, folder, { ...out, salvato: new Date().toISOString(), versione: APP_VERSION });
-  localStorage.setItem('cantina.syncFile', JSON.stringify({ folder, id: fileId }));
+  localStorage.setItem(cellarKey('cantina.syncFile'), JSON.stringify({ folder, id: fileId }));
 
   await syncSettings().catch((e) => diag(`Impostazioni su Drive non sincronizzate: ${e.message}`, false));
   downloadPhotos();
@@ -789,6 +801,133 @@ async function downloadPhotos() {
   } finally {
     downloading = false;
   }
+}
+
+// ---------- Cantine condivise ----------
+
+// Chiave API del Picker di Google (pubblica, accettata solo da gorod91.github.io) e numero del progetto Google Cloud.
+const PICKER_API_KEY = '';
+const GOOGLE_APP_ID = GOOGLE_CLIENT_ID.split('-')[0];
+
+function renderCellars() {
+  const list = [{ id: '', name: 'La mia cantina' }, ...cellars()];
+  const cur = currentCellar?.id || '';
+  $('#cellar-list').innerHTML = list.map((c) => `
+    <button type="button" class="cellar${c.id === cur ? ' on' : ''}" data-cellar="${esc(c.id)}">
+      <span class="radio" aria-hidden="true"></span>${esc(c.name)}${c.owner ? `<small>di ${esc(c.owner)}</small>` : ''}
+    </button>`).join('');
+  $('#share-box').hidden = !!currentCellar;
+  $('#btn-leave').hidden = !currentCellar;
+}
+
+function switchCellar(id) {
+  if ((currentCellar?.id || '') === id) return;
+  try { localStorage.setItem('cantina.cellar', id); } catch {}
+  location.reload();
+}
+
+async function shareCellar() {
+  const email = $('#share-email').value.trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Scrivi un indirizzo email valido.');
+  if (!driveToken()) { login(); return toast('Accedi con Google e poi tocca di nuovo Condividi.'); }
+  try {
+    const folder = await driveFolderId();
+    await syncNow();
+    await driveFetch(`${DRIVE_FILES}/${folder}/permissions?sendNotificationEmail=true&fields=id&emailMessage=` + encodeURIComponent(
+      `Ti ho condiviso la mia cantina. Apri ${location.origin}${location.pathname}, vai in Impostazioni e tocca "Aggiungi una cantina condivisa con te".`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'writer', type: 'user', emailAddress: email }),
+    });
+    $('#share-email').value = '';
+    toast(`Cantina condivisa con ${email}: riceverà un'email da Google.`);
+  } catch (e) {
+    toast('Condivisione non riuscita: ' + e.message);
+  }
+}
+
+function loadPicker() {
+  if (window.google?.picker) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://apis.google.com/js/api.js';
+    s.onload = () => gapi.load('picker', { callback: resolve, onerror: reject });
+    s.onerror = () => reject(new Error('Picker di Google non raggiungibile'));
+    document.head.append(s);
+  });
+}
+
+function showPicker(view, title, multi) {
+  return new Promise((resolve) => {
+    let b = new google.picker.PickerBuilder()
+      .addView(view)
+      .setOAuthToken(driveToken())
+      .setDeveloperKey(PICKER_API_KEY)
+      .setAppId(GOOGLE_APP_ID)
+      .setTitle(title)
+      .setCallback((data) => {
+        if (data.action === google.picker.Action.PICKED) resolve(data.docs || []);
+        else if (data.action === google.picker.Action.CANCEL) resolve([]);
+      });
+    if (multi) b = b.enableFeature(google.picker.Feature.MULTISELECT_ENABLED);
+    b.build().setVisible(true);
+  });
+}
+
+// Il permesso ristretto (drive.file) dà accesso solo a ciò che si sceglie nel Picker:
+// prima si sceglie la cartella e si controlla se l'app vede cantina.json; se no si scelgono i file della cartella.
+async function joinCellar() {
+  if (!driveToken()) { login(); return toast('Accedi con Google e poi tocca di nuovo "Aggiungi".'); }
+  if (!PICKER_API_KEY) return toast('Manca ancora la chiave API del Picker: arriva con il prossimo aggiornamento.');
+  try {
+    await loadPicker();
+    $('#dlg-settings').close();
+    const folderView = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+      .setIncludeFolders(true)
+      .setSelectFolderEnabled(true)
+      .setOwnedByMe(false)
+      .setMimeTypes('application/vnd.google-apps.folder');
+    const [folder] = await showPicker(folderView, 'Scegli la cartella della cantina condivisa con te');
+    if (!folder) return;
+    let file = await driveFindFile(SYNC_FILE, folder.id).catch(() => null);
+    diag(`Cantina condivisa "${folder.name}": cantina.json ${file ? 'visibile' : 'non visibile'} dopo la scelta della cartella.`, false);
+    if (!file) {
+      toast('Ora seleziona tutti i file della cartella (cantina.json e le foto).');
+      const filesView = new google.picker.DocsView(google.picker.ViewId.DOCS).setParent(folder.id).setIncludeFolders(false);
+      const picked = await showPicker(filesView, `Seleziona tutti i file di "${folder.name}"`, true);
+      diag(`Cantina condivisa: scelti ${picked.length} file.`, false);
+      file = await driveFindFile(SYNC_FILE, folder.id).catch(() => null);
+      if (!file) return toast('L\'app non vede ancora cantina.json in quella cartella. Riprova scegliendo anche quel file.');
+    }
+    const meta = await driveFetch(`${DRIVE_FILES}/${folder.id}?fields=name,owners(displayName)`).catch(() => ({}));
+    const owner = meta.owners?.[0]?.displayName || '';
+    const name = (prompt('Come vuoi chiamare questa cantina?', owner ? `Cantina di ${owner.split(' ')[0]}` : folder.name) || '').trim() || folder.name;
+    const list = cellars().filter((c) => c.id !== folder.id);
+    list.push({ id: folder.id, name, owner });
+    localStorage.setItem('cantina.cellars', JSON.stringify(list));
+    switchCellar(folder.id);
+  } catch (e) {
+    toast('Cantina condivisa non aggiunta: ' + (e.message || e));
+  }
+}
+
+function leaveCellar() {
+  if (!currentCellar || !confirm(`Togliere "${currentCellar.name}" da questo dispositivo? Su Drive non cambia niente e puoi riaggiungerla.`)) return;
+  localStorage.setItem('cantina.cellars', JSON.stringify(cellars().filter((c) => c.id !== currentCellar.id)));
+  for (const k of ['cantina.deleted', 'cantina.syncFile', 'cantina.syncedAt']) localStorage.removeItem(cellarKey(k));
+  indexedDB.deleteDatabase(DB_NAME);
+  indexedDB.deleteDatabase(DRINKS_DB);
+  switchCellar('');
+}
+
+function bindCellars() {
+  $('#cellar-list').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-cellar]');
+    if (b) switchCellar(b.dataset.cellar);
+  });
+  $('#btn-share').addEventListener('click', shareCellar);
+  $('#btn-join').addEventListener('click', joinCellar);
+  $('#btn-leave').addEventListener('click', leaveCellar);
 }
 
 // ---------- Gemini ----------
@@ -1845,7 +1984,7 @@ const VIEW_TITLES = { cellar: 'La mia cantina', diary: 'Diario', vintages: 'Anna
 function showView(view) {
   for (const v of Object.keys(VIEW_TITLES)) $(`#view-${v}`).hidden = v !== view;
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.dataset.view === view));
-  $('#view-title').textContent = VIEW_TITLES[view];
+  $('#view-title').textContent = view === 'cellar' && currentCellar ? currentCellar.name : VIEW_TITLES[view];
   window.scrollTo(0, 0);
 }
 
@@ -2432,6 +2571,7 @@ function readForm(w, fd = new FormData($('#wine-form'))) {
 function openSettings() {
   const form = $('#settings-form');
   for (const [k, v] of Object.entries(settings)) if (form.elements[k]) form.elements[k].value = v;
+  renderCellars();
   $('#dlg-settings').returnValue = '';
   $('#dlg-settings').showModal();
 }
@@ -2588,6 +2728,7 @@ function bindUi() {
   });
   bindGrouping();
   bindSelection();
+  bindCellars();
   bindDesk();
   $('#in-more').addEventListener('change', (e) => {
     const files = [...e.target.files];
@@ -2813,6 +2954,7 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pageshow', (e) => e.persisted && checkForUpdate());
 updateDriveStatus();
+if (currentCellar) $('#view-title').textContent = currentCellar.name;
 if (driveToken()) driveFolderId().catch(() => {});
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') syncSoon(300);
