@@ -17,7 +17,7 @@
 </head>
 <body>
   <header>
-    <h1>Cantina</h1>
+    <h1 id="view-title">La mia cantina</h1>
     <button id="btn-settings" class="ghost" aria-label="Impostazioni">⚙︎</button>
   </header>
 
@@ -25,21 +25,6 @@
     <section id="status-bar">
       <span id="drive-status">Drive: non collegato</span>
       <button id="btn-login" class="small">Accedi con Google</button>
-    </section>
-
-    <section id="add">
-      <label class="big-btn">
-        📷 Scatta foto
-        <input id="in-camera" type="file" accept="image/*" capture="environment" hidden>
-      </label>
-      <label class="big-btn">
-        🖼️ Importa immagini
-        <input id="in-files" type="file" accept="image/*" multiple hidden>
-      </label>
-      <label class="check">
-        <input id="same-wine" type="checkbox">
-        Le immagini importate insieme sono dello stesso vino (fronte/retro)
-      </label>
     </section>
 
     <section id="pending-section" hidden>
@@ -50,24 +35,109 @@
       <p class="hint" id="pending-hint"></p>
     </section>
 
-    <section>
-      <h2>Vini <span id="count"></span></h2>
+    <section id="view-cellar">
+      <input id="search" type="search" placeholder="Cerca vino, produttore, posizione…">
       <p class="hint" id="usage"></p>
-      <input id="search" type="search" placeholder="Cerca per produttore, nome, denominazione…">
+      <div class="sortbar">
+        <label class="sort">Ordine:
+          <select id="sort">
+            <option value="recenti">aggiunti di recente</option>
+            <option value="nome">nome</option>
+            <option value="annata">annata, dalla più vecchia</option>
+            <option value="prezzo">prezzo, dal più alto</option>
+            <option value="bere">da bere prima</option>
+            <option value="colore">colore</option>
+          </select>
+        </label>
+        <button type="button" id="btn-import" class="link">Importa foto</button>
+      </div>
       <ul id="wine-list"></ul>
+      <button type="button" id="btn-finished" class="link" hidden></button>
+      <p class="hint swipe-hint">Scorri un vino verso sinistra per segnarlo bevuto.</p>
+    </section>
+
+    <section id="view-diary" hidden>
+      <div class="quick">
+        <button type="button" id="btn-drink-home">+ Bevuto a casa</button>
+        <button type="button" id="btn-drink-out">+ Bevuto fuori</button>
+      </div>
+      <p class="month" id="month-summary"></p>
+      <div id="diary"></div>
     </section>
   </main>
 
   <footer><button type="button" id="btn-notes" class="link">v<span id="app-version"></span> · Note di rilascio</button></footer>
 
+  <nav class="tabbar">
+    <button type="button" class="tab on" data-view="cellar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>Cantina
+    </button>
+    <label class="shutter-btn" aria-label="Fotografa un vino">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h2l1.6-2h5.8l1.6 2h2A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.8"/></svg>
+      <input id="in-camera" type="file" accept="image/*" capture="environment" hidden>
+    </label>
+    <button type="button" class="tab" data-view="diary">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h11"/></svg>Diario
+    </button>
+  </nav>
+  <input id="in-files" type="file" accept="image/*" multiple hidden>
+
+  <dialog id="dlg-same">
+    <form method="dialog">
+      <h2>Foto di uno stesso vino?</h2>
+      <p class="hint">Se sono fronte e retro della stessa bottiglia diventano un solo vino.</p>
+      <div class="actions">
+        <button value="many">Vini diversi</button>
+        <button value="same" class="primary">Stesso vino</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-drink">
+    <form method="dialog" id="drink-form">
+      <div class="lead">
+        <span class="thumb" id="drink-thumb"></span>
+        <div><h2 id="drink-title">Bevuta</h2><small id="drink-sub" class="hint"></small></div>
+      </div>
+      <label id="drink-name">Vino
+        <input name="nome" placeholder="Produttore, nome, annata" autocomplete="off">
+      </label>
+      <div class="seg">
+        <label><input type="radio" name="dove" value="casa">A casa</label>
+        <label><input type="radio" name="dove" value="fuori">Fuori</label>
+      </div>
+      <div class="grid2" id="drink-out">
+        <label>Locale<input name="locale" autocomplete="off"></label>
+        <label>Prezzo pagato (€)<input name="prezzo" inputmode="decimal"></label>
+      </div>
+      <label>Data<input type="date" name="data"></label>
+      <div class="score-row">
+        <span>Voto</span>
+        <output id="score-out">—</output>
+        <span id="score-band" class="hint"></span>
+        <button type="button" id="score-clear" class="link">togli voto</button>
+      </div>
+      <input type="range" name="voto" id="score" min="1" max="100" value="80" aria-label="Voto da 1 a 100">
+      <div class="scale"><span>1</span><span>60</span><span>70</span><span>80</span><span>90</span><span>100</span></div>
+      <label>Note<textarea name="note" rows="2"></textarea></label>
+      <div class="actions">
+        <button type="button" id="btn-drink-delete" class="danger">Annulla bevuta</button>
+        <button value="cancel" formnovalidate>Chiudi</button>
+        <button value="save" class="primary">Salva nel diario</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="dlg-wine">
     <form method="dialog" id="wine-form">
       <div class="photos" id="wine-photos"></div>
       <div id="wine-state" class="hint"></div>
+      <div id="wine-drinks"></div>
       <div id="wine-fields"></div>
       <details id="wine-debug" class="debug"><summary>Registro (debug)</summary><button type="button" id="btn-copy-log" class="small">Copia registro</button><div id="wine-log"></div></details>
       <div class="actions">
         <button type="button" id="btn-delete" class="danger">Elimina</button>
+        <button type="button" id="btn-wine-drink">Segna bevuta</button>
         <button type="button" id="btn-google">Cerca su Google</button>
         <button type="button" id="btn-rerun">Riconosci di nuovo</button>
         <button value="cancel" formnovalidate>Chiudi</button>

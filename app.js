@@ -1,9 +1,16 @@
 'use strict';
 
-const APP_VERSION = '0.3.10';
+const APP_VERSION = '0.4.0';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.4.0', notes: [
+    'Nuova barra in basso: Cantina, fotocamera al centro, Diario. "Importa foto" è sopra la lista.',
+    'La lista mostra prezzo e bottiglie di ogni vino. Di base è in ordine di aggiunta, dal più recente; tocca "Ordine" per cambiarlo (nome, annata, prezzo, da bere prima, colore).',
+    'Scorri un vino verso sinistra per segnarlo bevuto: si apre il foglio con voto da 1 a 100, a casa o fuori, data e note. Puoi annullare.',
+    'Diario: tutte le bevute per data, con il riassunto del mese. Puoi aggiungere anche vini bevuti fuori o non presenti in cantina.',
+    'I vini finiti spariscono dalla cantina ma restano nella ricerca e nel diario. Nella scheda del vino ci sono le sue bevute e il pulsante "Segna bevuta".',
+  ] },
   { v: '0.3.10', notes: ['Drive: le foto vanno tutte in una sola cartella "Cantina". Le cartelle doppie create prima vengono unite da sole all\'accesso e quelle vuote finiscono nel cestino.'] },
   { v: '0.3.9', notes: ['Accesso a Drive con il pulsante "Accedi con Google": non serve più inserire il Client ID nelle impostazioni.'] },
   { v: '0.3.8', notes: [
@@ -84,23 +91,29 @@ function saveSettings(next) {
 
 const DB_NAME = 'cantina';
 const STORE = 'wines';
+// Bevute: una riga per ogni bottiglia bevuta, a casa o fuori (il Diario).
+const DRINKS = 'drinks';
 let dbPromise;
 
 function db() {
   dbPromise ??= new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: 'id' });
+    const req = indexedDB.open(DB_NAME, 2);
+    req.onupgradeneeded = () => {
+      for (const name of [STORE, DRINKS]) {
+        if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name, { keyPath: 'id' });
+      }
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
   return dbPromise;
 }
 
-async function store(mode, fn) {
+async function store(mode, fn, name = STORE) {
   const d = await db();
   return new Promise((resolve, reject) => {
-    const tx = d.transaction(STORE, mode);
-    const req = fn(tx.objectStore(STORE));
+    const tx = d.transaction(name, mode);
+    const req = fn(tx.objectStore(name));
     tx.oncomplete = () => resolve(req?.result);
     tx.onerror = () => reject(tx.error);
   });
@@ -110,6 +123,10 @@ const getWine = (id) => store('readonly', (s) => s.get(id));
 const allWines = () => store('readonly', (s) => s.getAll());
 const putWine = (w) => store('readwrite', (s) => s.put({ ...w, updatedAt: Date.now() }));
 const deleteWine = (id) => store('readwrite', (s) => s.delete(id));
+
+const allDrinks = () => store('readonly', (s) => s.getAll(), DRINKS);
+const putDrink = (d) => store('readwrite', (s) => s.put({ ...d, updatedAt: Date.now() }), DRINKS);
+const deleteDrink = (id) => store('readwrite', (s) => s.delete(id), DRINKS);
 
 // Le modifiche sono in coda: caricamento su Drive e riconoscimento lavorano in parallelo sullo stesso vino.
 let writeQueue = Promise.resolve();
@@ -913,7 +930,7 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 // Gli URL della lista e del dettaglio si liberano separatamente, così un aggiornamento della lista non rompe il dettaglio aperto.
-const objectUrls = { list: [], dialog: [] };
+const objectUrls = { list: [], dialog: [], drink: [] };
 function blobUrl(blob, group) {
   const u = URL.createObjectURL(blob);
   objectUrls[group].push(u);
@@ -955,11 +972,20 @@ function wineTitle(w) {
   return [d.produttore, d.nome].filter(Boolean).join(' · ') || 'Vino senza nome';
 }
 
-const formatPrice = (eur) => Number(eur).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: eur >= 100 ? 0 : 2 });
+const formatPrice = (eur) => Number(eur).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', minimumFractionDigits: Number.isInteger(Number(eur)) ? 0 : 2, maximumFractionDigits: eur >= 100 ? 0 : 2 });
 
-function wineSubtitle(w) {
+// Nella lista: il vino e l'annata in grassetto, sotto produttore e denominazione.
+function listTitle(w) {
   const d = w.data || {};
-  return [d.denominazione, d.annata, d.colore || d.tipologia, d.stile !== 'fermo' && d.stile, d.prezzo && `~${formatPrice(d.prezzo)}`].filter(Boolean).join(' · ');
+  const name = d.nome || d.denominazione || d.produttore;
+  return name ? [name, d.annata].filter(Boolean).join(' ') : 'Vino senza nome';
+}
+
+function listSubtitle(w) {
+  const d = w.data || {};
+  const name = d.nome || d.denominazione || d.produttore;
+  return [d.produttore !== name && d.produttore, d.denominazione !== name && d.denominazione, d.colore, d.stile !== 'fermo' && d.stile, w.posizione]
+    .filter(Boolean).join(' · ');
 }
 
 // Stato rispetto alla finestra di consumo, solo per i vini con annata.
@@ -969,10 +995,10 @@ function drinkState(d) {
   const to = Number(d.bere_entro) || null;
   if (!d.annata || (!from && !to)) return null;
   const year = new Date().getFullYear();
-  if (from && year < from) return `Da aspettare (dal ${from})`;
-  if (to && year > to) return `Oltre il momento migliore (entro ${to})`;
-  if (to && year >= to - 1) return `Da bere presto (entro ${to})`;
-  return `Pronto${to ? ` (entro ${to})` : ''}`;
+  if (from && year < from) return { k: 'wait', text: 'Da aspettare', title: `dal ${from}` };
+  if (to && year > to) return { k: 'over', text: 'Oltre', title: `al meglio entro il ${to}` };
+  if (to && year >= to - 1) return { k: 'soon', text: 'Da bere presto', title: `entro il ${to}` };
+  return { k: 'ok', text: 'Pronto', title: to ? `entro il ${to}` : '' };
 }
 
 function wineBadges(w) {
@@ -983,20 +1009,54 @@ function wineBadges(w) {
   if (w.status === 'error') b.push('Errore Gemini');
   if (w.notWine) b.push('Non sembra un vino');
   if (w.photos.some((p) => !p.driveId)) b.push('Drive in attesa');
-  const drink = drinkState(w.data);
-  if (drink) b.push(drink);
   return b;
 }
 
+// ---------- Ordinamento della cantina ----------
+
+const COLOR_ORDER = ['rosso', 'bianco', 'rosato', 'orange'];
+const byNumber = (get, dir) => (a, b) => {
+  const x = Number(get(a)) || null;
+  const y = Number(get(b)) || null;
+  if (x === y) return b.createdAt - a.createdAt;
+  if (x == null) return 1;
+  if (y == null) return -1;
+  return (x - y) * dir;
+};
+const SORTS = {
+  recenti: (a, b) => b.createdAt - a.createdAt,
+  nome: (a, b) => listTitle(a).localeCompare(listTitle(b), 'it'),
+  annata: byNumber((w) => w.data?.annata, 1),
+  prezzo: byNumber((w) => w.data?.prezzo, -1),
+  bere: byNumber((w) => w.data?.annata && w.data?.bere_entro, 1),
+  colore: (a, b) => {
+    const i = (w) => { const n = COLOR_ORDER.indexOf(w.data?.colore); return n < 0 ? COLOR_ORDER.length : n; };
+    return i(a) - i(b) || b.createdAt - a.createdAt;
+  },
+};
+
+function sortKey() {
+  try { return SORTS[localStorage.getItem('cantina.sort')] ? localStorage.getItem('cantina.sort') : 'recenti'; } catch { return 'recenti'; }
+}
+
+let showFinished = false;
+let swiping = false;
 let renderQueued = false;
 function scheduleRender() {
   if (renderQueued) return;
   renderQueued = true;
-  requestAnimationFrame(() => { renderQueued = false; render(); });
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    // Durante uno swipe la lista non si ridisegna, altrimenti la riga scapperebbe dal dito.
+    if (swiping) return scheduleRenderAfterSwipe();
+    render();
+  });
 }
+let renderAfterSwipe = false;
+function scheduleRenderAfterSwipe() { renderAfterSwipe = true; }
 
 async function render() {
-  const wines = (await allWines()).sort((a, b) => b.createdAt - a.createdAt);
+  const wines = (await allWines()).sort(SORTS[sortKey()]);
   releaseUrls('list');
   // Il registro della scheda aperta si aggiorna mentre il riconoscimento procede.
   if (editingId && $('#dlg-wine').open) {
@@ -1004,26 +1064,43 @@ async function render() {
     if (open) renderLog(open);
   }
   const q = $('#search').value.trim().toLowerCase();
-  const shown = q
+  const matching = q
     ? wines.filter((w) => JSON.stringify(w.data || {}).toLowerCase().includes(q) || (w.posizione || '').toLowerCase().includes(q))
     : wines;
-  const bottles = wines.reduce((n, w) => n + (Number(w.quantita) || 0), 0);
-  $('#count').textContent = `(${wines.length} vini, ${bottles} bottiglie)`;
-  const priced = wines.filter((w) => Number(w.data?.prezzo) > 0);
+  // I vini finiti restano nell'app (diario, ricerca) ma non nella cantina, se non si chiede di vederli.
+  const finished = matching.filter((w) => !(Number(w.quantita) > 0));
+  const shown = q || showFinished ? matching : matching.filter((w) => Number(w.quantita) > 0);
+  const inCellar = wines.filter((w) => Number(w.quantita) > 0);
+  const bottles = inCellar.reduce((n, w) => n + (Number(w.quantita) || 0), 0);
+  const priced = inCellar.filter((w) => Number(w.data?.prezzo) > 0);
   const value = priced.reduce((n, w) => n + Number(w.data.prezzo) * (Number(w.quantita) || 0), 0);
-  $('#usage').textContent = value
-    ? `Valore stimato della cantina: ${formatPrice(value)}${priced.length < wines.length ? ` (prezzo noto per ${priced.length} vini su ${wines.length})` : ''}`
-    : '';
-  $('#wine-list').innerHTML = shown.map((w) => `
-    <li data-id="${w.id}">
-      ${imgTag(w.photos[0], thumbBlob, 'list')}
-      <div>
-        <strong>${esc(wineTitle(w))}</strong>
-        <small>${esc(wineSubtitle(w))}</small>
-        <small>${w.quantita} bott.${w.posizione ? ' · ' + esc(w.posizione) : ''}</small>
-        ${wineBadges(w).map((b) => `<span class="badge">${esc(b)}</span>`).join('')}
+  $('#usage').textContent = [
+    `${bottles} ${bottles === 1 ? 'bottiglia' : 'bottiglie'}`,
+    `${inCellar.length} vini`,
+    value ? `valore ~${formatPrice(value)}${priced.length < inCellar.length ? ` (prezzo noto per ${priced.length})` : ''}` : '',
+  ].filter(Boolean).join(' · ');
+  $('#wine-list').innerHTML = shown.map((w) => {
+    const state = drinkState(w.data);
+    const price = Number(w.data?.prezzo) > 0 ? formatPrice(w.data.prezzo) : '';
+    return `
+    <li data-id="${w.id}" class="${Number(w.quantita) > 0 ? '' : 'finished'}">
+      <div class="row-under">Bevuta</div>
+      <div class="row">
+        ${w.photos?.[0] ? imgTag(w.photos[0], thumbBlob, 'list') : `<span class="dot ${esc(w.data?.colore || '')}"></span>`}
+        <div class="meta">
+          <strong>${esc(listTitle(w))}</strong>
+          <small>${esc(listSubtitle(w))}</small>
+          ${wineBadges(w).map((b) => `<span class="badge">${esc(b)}</span>`).join('')}
+        </div>
+        <div class="right">
+          <span class="qty">${price ? `<span class="price">${esc(price)}</span> ` : ''}×${Number(w.quantita) || 0}</span>
+          ${state ? `<span class="pill ${state.k}" title="${esc(state.title)}">${esc(state.text)}</span>` : ''}
+        </div>
       </div>
-    </li>`).join('') || '<li class="empty">Nessun vino. Scatta o importa una foto per iniziare.</li>';
+    </li>`;
+  }).join('') || `<li class="empty">${q ? 'Nessun vino trovato.' : 'Nessun vino in cantina. Tocca la fotocamera in basso per aggiungerne uno.'}</li>`;
+  $('#btn-finished').hidden = q || !finished.length;
+  $('#btn-finished').textContent = showFinished ? 'Nascondi i vini finiti' : `Mostra i vini finiti (${finished.length})`;
 
   const pending = wines.filter((w) => w.status !== 'ok' || w.photos.some((p) => !p.driveId));
   $('#pending-section').hidden = pending.length === 0;
@@ -1033,6 +1110,265 @@ async function render() {
     noDrive ? `${noDrive} foto da caricare su Drive` : '',
     noAi ? `${noAi} vini da riconoscere` : '',
   ].filter(Boolean).join(' · ');
+  await renderDiary(wines);
+}
+
+// ---------- Viste ----------
+
+const VIEW_TITLES = { cellar: 'La mia cantina', diary: 'Diario' };
+
+function showView(view) {
+  for (const v of Object.keys(VIEW_TITLES)) $(`#view-${v}`).hidden = v !== view;
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.dataset.view === view));
+  $('#view-title').textContent = VIEW_TITLES[view];
+  window.scrollTo(0, 0);
+}
+
+// ---------- Swipe = bevuta ----------
+
+function bindSwipe() {
+  const list = $('#wine-list');
+  let row = null;
+  let x0 = 0;
+  let y0 = 0;
+  let dx = 0;
+  let locked = null; // 'x' quando il gesto è orizzontale, 'y' se è uno scorrimento della pagina
+  let moved = false;
+
+  list.addEventListener('pointerdown', (e) => {
+    const li = e.target.closest('li[data-id]');
+    if (!li || li.classList.contains('finished') || e.button > 0) return;
+    row = li.querySelector('.row');
+    x0 = e.clientX;
+    y0 = e.clientY;
+    dx = 0;
+    locked = null;
+    moved = false;
+    row.classList.remove('anim');
+  });
+  list.addEventListener('pointermove', (e) => {
+    if (!row) return;
+    const mx = e.clientX - x0;
+    const my = e.clientY - y0;
+    if (!locked && Math.hypot(mx, my) > 8) {
+      locked = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+      if (locked === 'x') { swiping = true; moved = true; row.setPointerCapture?.(e.pointerId); }
+    }
+    if (locked !== 'x') return;
+    dx = Math.min(0, Math.max(-160, mx));
+    row.style.transform = `translateX(${dx}px)`;
+    row.parentElement.classList.toggle('armed', dx < -80);
+  });
+  const end = () => {
+    if (!row) return;
+    const li = row.parentElement;
+    row.classList.add('anim');
+    row.style.transform = '';
+    li.classList.remove('armed');
+    const id = li.dataset.id;
+    const drink = locked === 'x' && dx < -80;
+    row = null;
+    swiping = false;
+    if (renderAfterSwipe) { renderAfterSwipe = false; setTimeout(scheduleRender, 260); }
+    if (drink) drinkFromCellar(id);
+  };
+  list.addEventListener('pointerup', end);
+  list.addEventListener('pointercancel', end);
+  // Un tocco apre la scheda, uno swipe no.
+  list.addEventListener('click', (e) => {
+    if (moved) { moved = false; return; }
+    const li = e.target.closest('li[data-id]');
+    if (li) openWine(li.dataset.id);
+  });
+}
+
+// ---------- Bevute e diario ----------
+
+const todayIso = () => {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
+
+// Fasce indicative accanto al voto in centesimi, come nella scheda AIS.
+function scoreBand(v) {
+  if (v == null) return '';
+  return v >= 90 ? 'eccellente' : v >= 80 ? 'ottimo' : v >= 70 ? 'buono' : v >= 60 ? 'accettabile' : 'non mi è piaciuto';
+}
+
+function wineSnapshot(w) {
+  const d = w.data || {};
+  const main = d.nome || d.denominazione || d.produttore;
+  return { nome: [listTitle(w), d.produttore !== main && d.produttore].filter(Boolean).join(' · '), colore: d.colore || null };
+}
+
+async function drinkFromCellar(id) {
+  const w = await getWine(id);
+  if (!w) return;
+  if (!(Number(w.quantita) > 0)) return toast('Non ci sono più bottiglie di questo vino.');
+  await updateWine(id, (cur) => ({ ...cur, quantita: Math.max(0, (Number(cur.quantita) || 0) - 1) }));
+  const drink = {
+    id: crypto.randomUUID(),
+    wineId: id,
+    fromCellar: true,
+    ...wineSnapshot(w),
+    data: todayIso(),
+    dove: 'casa',
+    locale: '',
+    prezzo: null,
+    voto: null,
+    note: '',
+    createdAt: Date.now(),
+  };
+  await putDrink(drink);
+  scheduleRender();
+  openDrink(drink, { fresh: true });
+}
+
+async function undoDrink(drink) {
+  await deleteDrink(drink.id);
+  if (drink.fromCellar && drink.wineId) {
+    await updateWine(drink.wineId, (cur) => ({ ...cur, quantita: (Number(cur.quantita) || 0) + 1 }));
+  }
+  scheduleRender();
+}
+
+// Foglio della bevuta. "fresh": appena segnata dalla cantina; senza id: nuova bevuta scritta a mano.
+const drinkEdit = { drink: null, fresh: false, saved: false, scoreSet: false };
+
+async function openDrink(drink, { fresh = false } = {}) {
+  const isNew = !drink.id;
+  drinkEdit.drink = drink;
+  drinkEdit.fresh = fresh;
+  drinkEdit.scoreSet = drink.voto != null;
+  const form = $('#drink-form');
+  const wine = drink.wineId ? await getWine(drink.wineId) : null;
+  releaseUrls('drink');
+  $('#drink-thumb').innerHTML = wine?.photos?.[0] ? imgTag(wine.photos[0], thumbBlob, 'drink') : '';
+  $('#drink-thumb').hidden = !wine?.photos?.[0];
+  $('#drink-title').textContent = isNew ? 'Nuova bevuta' : drink.nome || 'Bevuta';
+  $('#drink-sub').textContent = fresh
+    ? `Segnata ora · ${Number(wine?.quantita) > 0 ? `ne restano ${wine.quantita}` : 'era l\'ultima bottiglia'}`
+    : drink.fromCellar ? 'Dalla cantina' : '';
+  $('#drink-name').hidden = !!drink.wineId;
+  form.elements.nome.value = drink.nome || '';
+  form.elements.dove.value = drink.dove || 'casa';
+  form.elements.locale.value = drink.locale || '';
+  form.elements.prezzo.value = drink.prezzo ?? '';
+  form.elements.data.value = drink.data || todayIso();
+  form.elements.voto.value = drink.voto ?? 80;
+  form.elements.note.value = drink.note || '';
+  $('#btn-drink-delete').hidden = isNew;
+  $('#btn-drink-delete').textContent = drink.fromCellar ? 'Annulla bevuta' : 'Elimina';
+  syncDrinkForm();
+  $('#dlg-drink').returnValue = '';
+  $('#dlg-drink').showModal();
+}
+
+function syncDrinkForm() {
+  const form = $('#drink-form');
+  $('#drink-out').hidden = form.elements.dove.value !== 'fuori';
+  const v = drinkEdit.scoreSet ? Number(form.elements.voto.value) : null;
+  $('#score-out').textContent = v ?? '—';
+  $('#score-band').textContent = v == null ? 'trascina per votare' : scoreBand(v);
+  $('#score').classList.toggle('unset', v == null);
+  $('#score-clear').hidden = v == null;
+}
+
+function readDrinkForm(drink) {
+  const f = $('#drink-form').elements;
+  const price = Number(String(f.prezzo.value).replace(',', '.'));
+  const out = f.dove.value === 'fuori';
+  return {
+    ...drink,
+    id: drink.id || crypto.randomUUID(),
+    createdAt: drink.createdAt || Date.now(),
+    nome: drink.wineId ? drink.nome : f.nome.value.trim(),
+    dove: f.dove.value || 'casa',
+    locale: out ? f.locale.value.trim() : '',
+    prezzo: out && f.prezzo.value.trim() && Number.isFinite(price) ? price : null,
+    data: f.data.value || todayIso(),
+    voto: drinkEdit.scoreSet ? Number(f.voto.value) : null,
+    note: f.note.value.trim(),
+  };
+}
+
+function bindDrinkSheet() {
+  const form = $('#drink-form');
+  form.addEventListener('change', syncDrinkForm);
+  $('#score').addEventListener('input', () => { drinkEdit.scoreSet = true; syncDrinkForm(); });
+  $('#score').addEventListener('pointerdown', () => { drinkEdit.scoreSet = true; syncDrinkForm(); });
+  $('#score-clear').addEventListener('click', () => { drinkEdit.scoreSet = false; syncDrinkForm(); });
+  $('#btn-drink-delete').addEventListener('click', async () => {
+    const drink = drinkEdit.drink;
+    drinkEdit.drink = null;
+    $('#dlg-drink').close();
+    await undoDrink(drink);
+    toast(drink.fromCellar ? 'Bevuta annullata: la bottiglia è tornata in cantina.' : 'Bevuta eliminata.');
+  });
+  $('#dlg-drink').addEventListener('close', async () => {
+    const drink = drinkEdit.drink;
+    drinkEdit.drink = null;
+    releaseUrls('drink');
+    if (!drink) return;
+    if ($('#dlg-drink').returnValue === 'save') {
+      const next = readDrinkForm(drink);
+      if (!next.nome) return toast('Scrivi il nome del vino per salvare la bevuta.');
+      await putDrink(next);
+      scheduleRender();
+      if (drinkEdit.fresh) toast(`${next.nome} nel diario · tocca per annullare`, () => undoDrink(next));
+    } else if (drinkEdit.fresh) {
+      // Chiuso senza salvare: la bevuta resta (senza voto), con la possibilità di annullarla.
+      toast(`${drink.nome} bevuta · tocca per annullare`, () => undoDrink(drink));
+    }
+  });
+}
+
+const DAY_FMT = new Intl.DateTimeFormat('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+const MONTH_FMT = new Intl.DateTimeFormat('it-IT', { month: 'long', year: 'numeric' });
+
+function dayLabel(iso) {
+  const today = todayIso();
+  if (iso === today) return 'Oggi';
+  const y = new Date(Date.now() - 864e5);
+  if (iso === new Date(y.getTime() - y.getTimezoneOffset() * 60000).toISOString().slice(0, 10)) return 'Ieri';
+  const s = DAY_FMT.format(new Date(iso + 'T12:00:00'));
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+async function renderDiary(wines) {
+  const drinks = (await allDrinks()).sort((a, b) => b.data.localeCompare(a.data) || b.createdAt - a.createdAt);
+  const byId = new Map(wines.map((w) => [w.id, w]));
+  const month = todayIso().slice(0, 7);
+  const thisMonth = drinks.filter((d) => d.data.startsWith(month));
+  const votes = thisMonth.filter((d) => d.voto != null);
+  const m = MONTH_FMT.format(new Date());
+  $('#month-summary').textContent = drinks.length
+    ? `${m.charAt(0).toUpperCase() + m.slice(1)}: ${thisMonth.length} ${thisMonth.length === 1 ? 'bevuta' : 'bevute'}` +
+      `${thisMonth.some((d) => d.dove === 'fuori') ? ` · ${thisMonth.filter((d) => d.dove === 'fuori').length} fuori` : ''}` +
+      `${votes.length ? ` · media ${Math.round(votes.reduce((n, d) => n + d.voto, 0) / votes.length)}` : ''}`
+    : '';
+  $('#month-summary').hidden = !drinks.length;
+  let html = '';
+  let day = null;
+  for (const d of drinks) {
+    if (d.data !== day) {
+      if (day) html += '</ul>';
+      day = d.data;
+      html += `<h3 class="day">${esc(dayLabel(day))}</h3><ul class="entries">`;
+    }
+    const wine = d.wineId ? byId.get(d.wineId) : null;
+    const where = d.dove === 'fuori'
+      ? ['Fuori', d.locale, d.prezzo != null && formatPrice(d.prezzo)].filter(Boolean).join(' · ')
+      : `A casa${d.fromCellar ? ' · dalla cantina' : ''}`;
+    html += `
+      <li data-drink="${d.id}">
+        ${wine?.photos?.[0] ? imgTag(wine.photos[0], thumbBlob, 'list') : `<span class="dot ${esc(d.colore || '')}"></span>`}
+        <div class="meta"><strong>${esc(d.nome || 'Vino')}</strong><small>${esc(where)}</small>${d.note ? `<small class="note">${esc(d.note)}</small>` : ''}</div>
+        <span class="vote">${d.voto ?? ''}</span>
+      </li>`;
+  }
+  if (day) html += '</ul>';
+  $('#diary').innerHTML = html || '<p class="hint empty">Ancora nessuna bevuta. Scorri un vino della cantina verso sinistra, oppure aggiungi qui sopra quello che hai bevuto.</p>';
 }
 
 let editingId = null;
@@ -1076,6 +1412,10 @@ async function openWine(id) {
     ? `<details><summary>Fonti (${w.web.sources.length})</summary><ul>${w.web.sources
       .map((x) => `<li><a href="${esc(x.uri)}" target="_blank" rel="noopener">${esc(x.title)}</a></li>`).join('')}</ul></details>`
     : '');
+  const drinks = (await allDrinks()).filter((x) => x.wineId === id).sort((a, b) => b.data.localeCompare(a.data));
+  $('#wine-drinks').innerHTML = drinks.length
+    ? `<h3>Bevute</h3><ul class="history">${drinks.map((x) => `<li><span>${esc(dayLabel(x.data))}${x.dove === 'fuori' ? ' · fuori' : ''}</span><b>${x.voto ?? ''}</b></li>`).join('')}</ul>`
+    : '';
   const d = w.data || {};
   const uncertain = new Set(w.uncertain || []);
   const input = (k, l, v, type) => `
@@ -1129,7 +1469,7 @@ function openSettings() {
 
 async function exportJson() {
   const wines = (await allWines()).map(({ photos, ...w }) => ({ ...w, foto_drive: photos.map((p) => p.driveId) }));
-  const blob = new Blob([JSON.stringify({ versione: APP_VERSION, esportato: new Date().toISOString(), vini: wines }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ versione: APP_VERSION, esportato: new Date().toISOString(), vini: wines, bevute: await allDrinks() }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `cantina-${new Date().toISOString().slice(0, 10)}.json`;
@@ -1264,13 +1604,49 @@ function bindUi() {
   $('#app-version').textContent = APP_VERSION + (BUILD === 'dev' ? '' : ` (${BUILD})`);
   $('#btn-notes').addEventListener('click', showReleaseNotes);
   announceUpdate();
-  for (const sel of ['#in-camera', '#in-files']) {
-    $(sel).addEventListener('change', (e) => {
-      const files = [...e.target.files];
-      e.target.value = '';
-      addFiles(files, sel === '#in-files' && $('#same-wine').checked);
-    });
-  }
+  $('#in-camera').addEventListener('change', (e) => {
+    const files = [...e.target.files];
+    e.target.value = '';
+    addFiles(files, false);
+  });
+  // Più foto importate insieme: si chiede se sono fronte e retro dello stesso vino.
+  let importing = [];
+  $('#btn-import').addEventListener('click', () => $('#in-files').click());
+  $('#in-files').addEventListener('change', (e) => {
+    importing = [...e.target.files];
+    e.target.value = '';
+    if (importing.length < 2) return addFiles(importing, false);
+    $('#dlg-same').returnValue = '';
+    $('#dlg-same').showModal();
+  });
+  $('#dlg-same').addEventListener('close', () => {
+    const same = $('#dlg-same').returnValue === 'same';
+    if ($('#dlg-same').returnValue) addFiles(importing, same);
+    importing = [];
+  });
+  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showView(t.dataset.view)));
+  $('#sort').value = sortKey();
+  $('#sort').addEventListener('change', () => {
+    try { localStorage.setItem('cantina.sort', $('#sort').value); } catch {}
+    scheduleRender();
+  });
+  $('#btn-finished').addEventListener('click', () => { showFinished = !showFinished; scheduleRender(); });
+  bindSwipe();
+  bindDrinkSheet();
+  $('#btn-drink-home').addEventListener('click', () => openDrink({ dove: 'casa', fromCellar: false }));
+  $('#btn-drink-out').addEventListener('click', () => openDrink({ dove: 'fuori', fromCellar: false }));
+  $('#diary').addEventListener('click', async (e) => {
+    const li = e.target.closest('li[data-drink]');
+    if (!li) return;
+    const drink = (await allDrinks()).find((d) => d.id === li.dataset.drink);
+    if (drink) openDrink(drink);
+  });
+  $('#btn-wine-drink').addEventListener('click', async () => {
+    const id = editingId;
+    await updateWine(id, readForm);
+    $('#dlg-wine').close();
+    drinkFromCellar(id);
+  });
   $('#btn-login').addEventListener('click', login);
   $('#btn-logout').addEventListener('click', () => { logout(); toast('Disconnesso da Drive'); });
   $('#btn-settings').addEventListener('click', openSettings);
@@ -1280,10 +1656,6 @@ function bindUi() {
     processPending();
   });
   $('#search').addEventListener('input', scheduleRender);
-  $('#wine-list').addEventListener('click', (e) => {
-    const li = e.target.closest('li[data-id]');
-    if (li) openWine(li.dataset.id);
-  });
 
   $('#dlg-settings').addEventListener('close', () => {
     if ($('#dlg-settings').returnValue !== 'save') return;
@@ -1344,7 +1716,7 @@ const BUILD = (document.querySelector('meta[name="app-version"]') || {}).content
 
 /** Mai ricaricare durante un riconoscimento o con una scheda aperta. */
 function busyNow() {
-  return running.size > 0 || $('#dlg-wine').open || $('#dlg-settings').open;
+  return running.size > 0 || swiping || ['#dlg-wine', '#dlg-settings', '#dlg-drink', '#dlg-same'].some((s) => $(s).open);
 }
 
 async function checkForUpdate() {
