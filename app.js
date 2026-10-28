@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.3';
+const APP_VERSION = '0.3.4';
 
 // ---------- Impostazioni ----------
 
@@ -381,6 +381,48 @@ let geminiQueue = Promise.resolve();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // hooks: { wait(secondi), log(passo, testo), label } per il conto alla rovescia e il registro di debug.
+// ---------- Stima dei costi ----------
+
+// Prezzi indicativi del piano a pagamento (USD per milione di token, ottobre 2026, da verificare sul listino).
+// Sul piano gratuito il costo reale è zero: la stima serve a sapere quanto costerebbe passare a pagamento.
+const PRICES = [
+  { match: /flash-lite/, input: 0.1, output: 0.4 },
+  { match: /flash/, input: 0.5, output: 3 },
+  { match: /pro/, input: 2, output: 12 },
+];
+const GOOGLE_SEARCH_USD = 0.014; // per ricerca, oltre la quota gratuita
+const TAVILY_USD = 0.008; // per ricerca base, oltre le 1.000 gratuite al mese
+const USD_TO_EUR = 0.9;
+
+function geminiCostUsd(model, usage) {
+  const price = PRICES.find((p) => p.match.test(model)) || PRICES[1];
+  const input = usage?.promptTokenCount || 0;
+  // I token di ragionamento si pagano come output.
+  const output = (usage?.candidatesTokenCount || 0) + (usage?.thoughtsTokenCount || 0);
+  return (input * price.input + output * price.output) / 1e6;
+}
+
+const formatEur = (usd) => {
+  const eur = usd * USD_TO_EUR;
+  return eur < 0.01 ? `${(eur * 100).toFixed(2).replace('.', ',')} cent` : `${eur.toFixed(2).replace('.', ',')} €`;
+};
+
+// Totali del mese sul dispositivo (anche per i vini poi eliminati).
+function monthUsage() {
+  const month = new Date().toISOString().slice(0, 7);
+  try {
+    const u = JSON.parse(localStorage.getItem('cantina.usage') || 'null');
+    if (u?.month === month) return u;
+  } catch { /* si riparte da zero */ }
+  return { month, usd: 0, gemini: 0, google: 0, tavily: 0 };
+}
+
+function addMonthUsage(patch) {
+  const u = monthUsage();
+  for (const [k, v] of Object.entries(patch)) u[k] = (u[k] || 0) + v;
+  localStorage.setItem('cantina.usage', JSON.stringify(u));
+}
+
 let geminiPending = 0;
 
 function geminiCall(body, hooks) {
@@ -424,6 +466,10 @@ async function geminiFetch(body, hooks = {}) {
         candidate?.finishReason && candidate.finishReason !== 'STOP' ? `\n[fine: ${candidate.finishReason}]` : '',
       ].join(''));
       if (!text) throw new Error('Gemini non ha restituito dati');
+      const searches = g?.webSearchQueries?.length || 0;
+      const usd = geminiCostUsd(model, json.usageMetadata) + searches * GOOGLE_SEARCH_USD;
+      addMonthUsage({ usd, gemini: 1, google: searches });
+      hooks.cost?.({ step: hooks.label || 'Gemini', model, usd, searches, usage: json.usageMetadata });
       return { text, grounding: candidate.groundingMetadata };
     }
     log(`errore ${res.status} in ${((Date.now() - started) / 1000).toFixed(1)} s`, JSON.stringify(json.error || json, null, 2));
@@ -492,7 +538,7 @@ function parseJsonText(text) {
 // La ricerca non si può combinare con lo schema JSON su tutti i modelli, quindi il JSON è chiesto nel testo.
 // Ricerca con Tavily (piano gratuito, senza carta): restituisce già il testo delle pagine trovate,
 // che Gemini legge senza usare la sua ricerca Google (non inclusa in tutti i piani gratuiti).
-async function tavilySearch(query, log) {
+async function tavilySearch(query, log, cost) {
   log?.('Tavily · ricerca', query);
   const started = Date.now();
   let res;
@@ -512,6 +558,10 @@ async function tavilySearch(query, log) {
   const results = (json.results || []).map((r) => ({ title: r.title || r.url, uri: r.url, content: (r.content || '').slice(0, 1500) }));
   log?.(`Tavily · ${results.length} risultati in ${((Date.now() - started) / 1000).toFixed(1)} s`,
     results.map((r, n) => `[${n + 1}] ${r.title}\n${r.uri}\n${r.content}`).join('\n\n') || '(nessuno)');
+  // Le prime 1.000 ricerche del mese sono gratuite anche per chi paga Gemini.
+  const usd = monthUsage().tavily >= 1000 ? TAVILY_USD : 0;
+  addMonthUsage({ usd, tavily: 1 });
+  cost?.({ step: 'Tavily', model: 'tavily', usd, searches: 1 });
   return results;
 }
 
@@ -539,7 +589,7 @@ async function geminiDetails(data, hooks, mode) {
 Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.`;
   } else if (mode === 'tavily') {
     const query = ['produttore', 'nome', 'denominazione', 'annata'].map((k) => data[k]).filter(Boolean).join(' ');
-    sources = await tavilySearch(`${query} scheda tecnica`, hooks.log);
+    sources = await tavilySearch(`${query} scheda tecnica`, hooks.log, hooks.cost);
     intro = `Compila la scheda di questo vino: ${who}.
 Usa i risultati di ricerca qui sotto, preferendo il sito del produttore. Se riguardano un altro vino o un'altra annata, tienine conto.
 ${sources.map((r, n) => `[${n + 1}] ${r.title} (${r.uri})\n${r.content}`).join('\n\n') || '(nessun risultato)'}`;
@@ -599,8 +649,13 @@ async function recognize(id) {
     ...w,
     log: [...(w.log || []), { at: Date.now(), step, text: String(text ?? '').slice(0, 8000) }].slice(-60),
   }));
-  const hooks = { wait, log };
-  await updateWine(id, (w) => ({ ...w, log: [] }));
+  const cost = (c) => updateWine(id, (w) => ({
+    ...w,
+    costs: [...(w.costs || []), { step: c.step, model: c.model, usd: c.usd, searches: c.searches }],
+    spentUsd: (w.spentUsd || 0) + c.usd,
+  }));
+  const hooks = { wait, log, cost };
+  await updateWine(id, (w) => ({ ...w, log: [], costs: [] }));
   log('Avvio', `Ricerca: ${settings.search} → ${searchPlan().join(' → ')} · modelli: lettura ${readModel()}, dettagli ${detailsModel()}`);
   try {
     let current = wine;
@@ -800,6 +855,10 @@ async function render() {
     : wines;
   const bottles = wines.reduce((n, w) => n + (Number(w.quantita) || 0), 0);
   $('#count').textContent = `(${wines.length} vini, ${bottles} bottiglie)`;
+  const u = monthUsage();
+  $('#usage').textContent = u.gemini || u.tavily
+    ? `Questo mese: ${u.gemini} richieste Gemini, ${u.tavily}/1000 ricerche Tavily${u.google ? `, ${u.google} ricerche Google` : ''} · costo stimato a pagamento ${formatEur(u.usd)} (piano gratuito: 0 €)`
+    : '';
   $('#wine-list').innerHTML = shown.map((w) => `
     <li data-id="${w.id}">
       ${imgTag(w.photos[0], thumbBlob, 'list')}
@@ -849,6 +908,12 @@ async function openWine(id) {
     if (!where) state.push('Dettagli compilati da Gemini senza verifica (in giallo).');
     else if (!w.web.found) state.push(`Vino non trovato con la ricerca ${where}.`);
     else state.push(`Verificati con ${where}: ${w.web.confirmed.join(', ') || 'nessun campo'}.`);
+  }
+  if (w.costs?.length) {
+    const last = w.costs.reduce((n, c) => n + c.usd, 0);
+    const parts = w.costs.map((c) => `${c.step.replace(/ \(.*\)/, '')} ${c.model === 'tavily' && !c.usd ? 'gratis' : formatEur(c.usd)}`).join(' · ');
+    const total = w.spentUsd > last + 1e-9 ? ` Totale per questo vino: ${formatEur(w.spentUsd)}.` : '';
+    state.push(`Costo stimato a pagamento: ${formatEur(last)} (${parts}); sul piano gratuito 0 €.${total}`);
   }
   w.photos.forEach((p, i) => p.error && state.push(`Foto ${i + 1}: ${p.error}`));
   $('#wine-state').innerHTML = esc(state.join(' ')) + (w.web?.sources?.length
