@@ -492,3 +492,4 @@ body.selecting .tabbar { visibility: hidden; }
 #group-list li:not(.multi) .gphotos { grid-template-columns: 1fr; }
 .gtools { position: sticky; bottom: -1px; z-index: 1; grid-template-columns: 1fr 1fr; padding: 10px 0; background: var(--card); }
 .gtools .hint { grid-column: 1 / -1; margin: 0; }
+.add-photo { align-self: center; font-size: 0.85rem; margin-top: -4px; }

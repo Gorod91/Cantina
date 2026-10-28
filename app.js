@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.7.5';
+const APP_VERSION = '0.7.6';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.7.6', notes: ['Fronte e retro con la fotocamera: dopo la foto tocca l\'avviso "fotografa anche il retro". Nella scheda del vino c\'è "Aggiungi foto". Il vino viene riletto con tutte le foto.'] },
   { v: '0.7.5', notes: ['Raggruppa le foto più comodo: foto grandi, lente per vederle intere, scegli le foto dello stesso vino e premi Unisci (o Separa per dividerle).'] },
   { v: '0.7.4', notes: ['Etichetta prima del web: vitigni, gradazione, formato, regione e caratteristiche stampati in etichetta o retroetichetta vengono letti dalla foto e il web non li sovrascrive, li completa solo se mancano.', 'Dopo "Unisci" il vino viene riletto con tutte le foto insieme.'] },
   { v: '0.7.3', notes: ['Eliminare più vini: "Seleziona" sopra la lista, tocca i vini e poi Elimina. Nella scheda del vino il pulsante Elimina è in vista, non più dentro Modifica.'] },
@@ -1020,9 +1021,10 @@ function pickUserEdits(wine) {
 // ---------- Flusso di inserimento ----------
 
 const running = new Set();
+const runAgain = new Set(); // vini cambiati (per esempio una foto in più) mentre erano già in lettura
 
 async function processWine(id) {
-  if (running.has(id)) return;
+  if (running.has(id)) { runAgain.add(id); return; }
   running.add(id);
   try {
     const wine = await getWine(id);
@@ -1033,7 +1035,27 @@ async function processWine(id) {
   } finally {
     running.delete(id);
     scheduleRender();
+    if (runAgain.delete(id)) processWine(id);
   }
+}
+
+// Foto in più per un vino già inserito (il retro): si aggiungono e il vino si rilegge con tutte le foto.
+let morePhotosFor = null;
+function askMorePhotos(id) {
+  morePhotosFor = id;
+  $('#in-more').click();
+}
+async function addPhotosToWine(id, files) {
+  const photos = [];
+  for (const f of files) {
+    try { photos.push(await preparePhoto(f)); } catch (e) { toast(e.message); }
+  }
+  if (!photos.length) return;
+  const w = await updateWine(id, (cur) => ({ ...cur, photos: [...cur.photos, ...photos], status: 'new' }));
+  if (!w) return;
+  processWine(id);
+  if ($('#dlg-wine').open && editingId === id) renderHero(w.photos);
+  toast(photos.length === 1 ? 'Foto aggiunta: rileggo l\'etichetta.' : `${photos.length} foto aggiunte: rileggo l'etichetta.`);
 }
 
 async function processPending() {
@@ -1053,8 +1075,10 @@ async function addFiles(files) {
 }
 
 // Ogni gruppo di foto già preparate diventa un vino.
+let lastAddedId = null;
 async function addPhotoGroups(groups) {
   if (!groups.length) return;
+  lastAddedId = null;
   for (const photos of groups) {
     try {
       const wine = {
@@ -1069,11 +1093,17 @@ async function addPhotoGroups(groups) {
         photos,
       };
       await putWine(wine);
+      lastAddedId = wine.id;
       scheduleRender();
       processWine(wine.id);
     } catch (e) {
       toast(e.message);
     }
+  }
+  if (groups.length === 1 && groups[0].length === 1 && lastAddedId) {
+    const id = lastAddedId;
+    toast('Vino aggiunto. Tocca qui per fotografare anche il retro.', () => askMorePhotos(id));
+    return;
   }
   if (!settings.geminiKey) toast('Foto salvate. Inserisci la chiave Gemini nelle impostazioni per il riconoscimento.');
   else if (!driveToken()) toast('Foto salvate sul telefono. Accedi con Google per caricarle su Drive.');
@@ -2219,6 +2249,12 @@ function bindUi() {
   });
   bindGrouping();
   bindSelection();
+  $('#in-more').addEventListener('change', (e) => {
+    const files = [...e.target.files];
+    e.target.value = '';
+    if (files.length && morePhotosFor) addPhotosToWine(morePhotosFor, files);
+  });
+  $('#btn-add-photo').addEventListener('click', () => askMorePhotos(editingId));
   $('#btn-merge').addEventListener('click', async () => {
     const id = editingId;
     const twin = $('#btn-merge').dataset.twin;
