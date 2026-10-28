@@ -429,3 +429,16 @@ dialog.sheet.with-bar::before { display: none; }
 .legend span { display: flex; align-items: center; gap: 5px; }
 .legend i { width: 12px; height: 6px; border-radius: 3px; display: inline-block; background: var(--ok); }
 .legend i.wait { background: var(--wait); } .legend i.soon { background: var(--soon); } .legend i.over { background: var(--over); }
+
+/* Diario: stessa targhetta della cantina */
+.entries li { display: block; padding: 0; }
+.entries .row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; cursor: pointer; }
+.entries img, .entries .dot { width: 38px; height: 56px; border-radius: 8px; }
+.entries .where { color: var(--wine-text); }
+.entries .note { white-space: normal; font-style: italic; }
+.vote-band { font-size: 0.68rem; color: var(--muted); font-weight: 600; }
+
+/* Note personali */
+.notes-box { margin: 0; cursor: text; }
+.notes-box textarea { background: var(--card); resize: none; overflow: hidden; min-height: 52px; field-sizing: content; line-height: 1.45; }
+#wine-list .meta .note { color: var(--wine-text); font-style: italic; }

@@ -1,9 +1,11 @@
 'use strict';
 
-const APP_VERSION = '0.6.2';
+const APP_VERSION = '0.6.4';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.6.4', notes: ['Le mie note: nella scheda di ogni vino c\'è un riquadro per scrivere note personali, visibili anche nella lista e trovabili con la ricerca.'] },
+  { v: '0.6.3', notes: ['Diario: le bevute hanno la stessa targhetta della cantina (foto, calice, nome, produttore) con in più dove, prezzo, note e voto.'] },
   { v: '0.6.2', notes: ['Spumanti: bollicine che salgono sopra il calice, così si distinguono dai bianchi fermi.'] },
   { v: '0.6.1', notes: ['Spumanti: calice a tulipano con le bollicine al posto della flûte.'] },
   { v: '0.6.0', notes: [
@@ -1271,7 +1273,7 @@ async function render() {
   }
   const q = $('#search').value.trim().toLowerCase();
   const matching = q
-    ? wines.filter((w) => JSON.stringify(w.data || {}).toLowerCase().includes(q) || (w.posizione || '').toLowerCase().includes(q))
+    ? wines.filter((w) => [JSON.stringify(w.data || {}), w.posizione, w.nota, w.acquisto_luogo].join(' ').toLowerCase().includes(q))
     : wines;
   // I vini finiti restano nell'app (diario, ricerca) ma non nella cantina, se non si chiede di vederli.
   const finished = matching.filter((w) => !(Number(w.quantita) > 0));
@@ -1301,6 +1303,7 @@ async function render() {
         <div class="meta">
           <strong>${colorIcon(w.data)}${esc(listTitle(w))}</strong>
           <small>${esc(listSubtitle(w))}</small>
+          ${w.nota ? `<small class="note">${esc(w.nota)}</small>` : ''}
           ${wineBadges(w).map((b) => `<span class="badge">${esc(b)}</span>`).join('')}
         </div>
         <div class="right">
@@ -1447,7 +1450,7 @@ function scoreBand(v) {
 function wineSnapshot(w) {
   const d = w.data || {};
   const main = d.nome || d.denominazione || d.produttore;
-  return { nome: [listTitle(w), d.produttore !== main && d.produttore].filter(Boolean).join(' · '), colore: d.colore || null };
+  return { nome: [listTitle(w), d.produttore !== main && d.produttore].filter(Boolean).join(' · '), colore: d.colore || null, stile: d.stile || null };
 }
 
 async function drinkFromCellar(id) {
@@ -1609,11 +1612,24 @@ async function renderDiary(wines) {
     const where = d.dove === 'fuori'
       ? ['Fuori', d.locale, d.prezzo != null && formatPrice(d.prezzo)].filter(Boolean).join(' · ')
       : `A casa${d.fromCellar ? ' · dalla cantina' : ''}`;
+    // Stessa targhetta della cantina (foto, calice, nome, produttore) più le informazioni della bevuta.
+    const data = wine?.data || { colore: d.colore, stile: d.stile };
+    const title = wine ? listTitle(wine) : d.nome || 'Vino';
+    const sub = wine ? listSubtitle({ ...wine, posizione: '' }) : '';
     html += `
       <li data-drink="${d.id}">
-        ${wine?.photos?.[0] ? imgTag(wine.photos[0], thumbBlob, 'list') : `<span class="dot ${esc(d.colore || '')}"></span>`}
-        <div class="meta"><strong>${esc(d.nome || 'Vino')}</strong><small>${esc(where)}</small>${d.note ? `<small class="note">${esc(d.note)}</small>` : ''}</div>
-        <span class="vote">${d.voto ?? ''}</span>
+        <div class="row">
+          ${wine?.photos?.[0] ? imgTag(wine.photos[0], thumbBlob, 'list') : `<span class="dot ${esc(d.colore || '')}"></span>`}
+          <div class="meta">
+            <strong>${colorIcon(data)}${esc(title)}</strong>
+            ${sub ? `<small>${esc(sub)}</small>` : ''}
+            <small class="where">${esc(where)}</small>
+            ${d.note ? `<small class="note">${esc(d.note)}</small>` : ''}
+          </div>
+          <div class="right">
+            ${d.voto != null ? `<span class="vote">${d.voto}</span><span class="vote-band">${esc(scoreBand(d.voto))}</span>` : '<span class="vote-band">senza voto</span>'}
+          </div>
+        </div>
       </li>`;
   }
   if (day) html += '</ul>';
@@ -1777,7 +1793,8 @@ async function openWine(id) {
   $('#dlg-wine').returnValue = '';
   $('#dlg-wine').showModal();
   $('#dlg-wine').scrollTop = 0;
-  $('#wine-fields').querySelectorAll('textarea').forEach(autosize);
+  $('#wine-form').elements.nota.value = w.nota || '';
+  $('#dlg-wine').querySelectorAll('textarea').forEach(autosize);
 }
 
 function readForm(w) {
@@ -1803,6 +1820,7 @@ function readForm(w) {
     uncertain: (w.uncertain || []).filter((k) => !edited.has(k)),
     quantita: Math.max(0, parseInt(fd.get('quantita'), 10) || 0),
     posizione: String(fd.get('posizione') || '').trim(),
+    nota: String(fd.get('nota') || '').trim(),
     acquisto_luogo: String(fd.get('acquisto_luogo') || '').trim(),
     acquisto_data: String(fd.get('acquisto_data') || ''),
     prezzo_pagato: (() => { const n = Number(String(fd.get('prezzo_pagato') || '').replace(',', '.')); return String(fd.get('prezzo_pagato') || '').trim() && Number.isFinite(n) ? n : null; })(),
