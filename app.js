@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.3.9';
+const APP_VERSION = '0.3.10';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.3.10', notes: ['Drive: le foto vanno tutte in una sola cartella "Cantina". Le cartelle doppie create prima vengono unite da sole all\'accesso e quelle vuote finiscono nel cestino.'] },
   { v: '0.3.9', notes: ['Accesso a Drive con il pulsante "Accedi con Google": non serve più inserire il Client ID nelle impostazioni.'] },
   { v: '0.3.8', notes: [
     'Momento migliore per bere il vino, cercato sul web solo per i vini con annata: "Da bere dal", "Al meglio entro" e una nota.',
@@ -227,6 +228,7 @@ function initTokenClient() {
         expiresAt: Date.now() + Number(resp.expires_in) * 1000,
       }));
       updateDriveStatus();
+      driveFolderId().catch(() => {});
       processPending();
     },
   });
@@ -246,7 +248,7 @@ function logout() {
   const t = loadToken();
   if (t && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(t.accessToken);
   localStorage.removeItem('cantina.token');
-  localStorage.removeItem('cantina.folderId');
+  folderPromise = null;
   updateDriveStatus();
 }
 
@@ -269,23 +271,55 @@ async function driveFetch(url, opts = {}) {
   return res.json();
 }
 
-async function driveFolderId() {
-  const cached = localStorage.getItem('cantina.folderId');
-  if (cached) return cached;
+// Una sola ricerca per sessione, condivisa tra i caricamenti in parallelo:
+// prima ogni foto cercava la cartella per conto suo e, non trovandola ancora, ne creava un'altra.
+let folderPromise = null;
+
+function driveFolderId() {
+  folderPromise ??= findOrCreateFolder().catch((e) => {
+    folderPromise = null;
+    throw e;
+  });
+  return folderPromise;
+}
+
+async function findOrCreateFolder() {
   const name = settings.driveFolder || 'Cantina';
   const q = `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-  const found = await driveFetch('https://www.googleapis.com/drive/v3/files?fields=files(id)&q=' + encodeURIComponent(q));
-  let id = found.files?.[0]?.id;
-  if (!id) {
+  const found = await driveFetch('https://www.googleapis.com/drive/v3/files?fields=files(id)&orderBy=createdTime&q=' + encodeURIComponent(q));
+  const [first, ...dupes] = found.files || [];
+  if (!first) {
     const created = await driveFetch('https://www.googleapis.com/drive/v3/files?fields=id', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' }),
     });
-    id = created.id;
+    return created.id;
   }
-  localStorage.setItem('cantina.folderId', id);
-  return id;
+  for (const dupe of dupes) await mergeFolder(dupe.id, first.id);
+  return first.id;
+}
+
+// Sposta le foto delle cartelle doppie (create dalla 0.3.9 e precedenti) nella prima e cestina quelle vuote.
+async function mergeFolder(fromId, toId) {
+  try {
+    const q = `'${fromId}' in parents and trashed=false`;
+    const list = await driveFetch('https://www.googleapis.com/drive/v3/files?fields=files(id)&pageSize=1000&q=' + encodeURIComponent(q));
+    for (const f of list.files || []) {
+      await driveFetch(`https://www.googleapis.com/drive/v3/files/${f.id}?addParents=${toId}&removeParents=${fromId}&fields=id`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+    }
+    await driveFetch(`https://www.googleapis.com/drive/v3/files/${fromId}?fields=id`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashed: true }),
+    });
+  } catch (e) {
+    console.warn('Unione cartelle Drive non riuscita', e);
+  }
 }
 
 async function driveUpload(blob, name) {
@@ -1256,7 +1290,7 @@ function bindUi() {
     const form = $('#settings-form');
     const prevFolder = settings.driveFolder;
     saveSettings(Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map((k) => [k, form.elements[k].value.trim()])));
-    if (prevFolder !== settings.driveFolder) localStorage.removeItem('cantina.folderId');
+    if (prevFolder !== settings.driveFolder) folderPromise = null;
     processPending();
     scheduleRender();
   });
@@ -1354,6 +1388,7 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pageshow', (e) => e.persisted && checkForUpdate());
 updateDriveStatus();
+if (driveToken()) driveFolderId().catch(() => {});
 registerServiceWorker();
 navigator.storage?.persist?.();
 migratePhotos().catch(() => {}).then(render).then(processPending);
