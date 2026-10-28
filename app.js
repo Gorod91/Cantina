@@ -1,11 +1,12 @@
 'use strict';
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.6.1';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.6.1', notes: ['Spumanti: calice a tulipano con le bollicine al posto della flûte.'] },
   { v: '0.6.0', notes: [
-    'Il colore del vino è un calice colorato (flûte per le bollicine) invece della scritta.',
+    'Il colore del vino è un calice colorato (a tulipano con le bollicine per gli spumanti) invece della scritta.',
     'Filtri: colore, quando berlo, provenienza, prezzo e negozio. Il pulsante accanto alla ricerca mostra quanti filtri sono attivi.',
     'Dati di acquisto: dove, quando e prezzo pagato (in "Modifica i dati del vino"). Il prezzo pagato sostituisce la stima nella lista; la stima ha la ~.',
     'Annate: nuova scheda nella barra in basso con le finestre di consumo su una linea del tempo e la linea di oggi.',
@@ -1118,15 +1119,15 @@ function listSubtitle(w) {
     .filter(Boolean).join(' · ');
 }
 
-// Colore come simbolo: calice pieno del colore del vino, flûte per le bollicine.
+// Colore come simbolo: calice pieno del colore del vino; per le bollicine un calice a tulipano con le bollicine.
 const COLOR_NAMES = { rosso: 'Rosso', bianco: 'Bianco', rosato: 'Rosato', orange: 'Orange' };
 const isBubbly = (d) => /spumante|frizzante|rifermentato/.test(d?.stile || '');
 function colorIcon(d, size = 'sm') {
   const c = COLOR_NAMES[d?.colore] ? d.colore : 'ignoto';
   const title = [COLOR_NAMES[d?.colore] || 'Colore non indicato', isBubbly(d) && 'con bollicine'].filter(Boolean).join(', ');
   const shape = isBubbly(d)
-    ? '<path class="wine" d="M9.5 3h5l-.6 9.2a1.9 1.9 0 0 1-3.8 0z"/><path class="glass" d="M12 14v6M9 21h6"/><circle class="bub" cx="11.4" cy="6.5" r=".7"/><circle class="bub" cx="12.7" cy="9" r=".6"/>'
-    : '<path class="wine" d="M6.5 8.5h11c0 4-2.4 6.2-5.5 6.2s-5.5-2.2-5.5-6.2z"/><path class="glass" d="M7 3h10c0 7-2 11.7-5 11.7S7 10 7 3zM12 14.7V20M8.5 21h7"/>';
+    ? '<path class="wine" d="M8.2 6.5h7.6c0 2.9-.4 5.1-1.5 6.4a2.9 2.9 0 0 1-4.6 0c-1.1-1.3-1.5-3.5-1.5-6.4z"/><path class="glass" d="M8 3h8c.5 4.3.2 8.1-1.3 10.1a3.4 3.4 0 0 1-5.4 0C7.8 11.1 7.5 7.3 8 3zM12 14.3V20M8.5 21h7"/><circle class="bub" cx="11" cy="9" r=".75"/><circle class="bub" cx="13" cy="10.6" r=".65"/><circle class="bub" cx="12.2" cy="7.6" r=".55"/>'
+    : '<path class="wine" d="M7.5 8.5h9c-.4 3.8-2.2 6-4.5 6s-4.1-2.2-4.5-6z"/><path class="glass" d="M7 3h10c0 7-2 11.7-5 11.7S7 10 7 3zM12 14.7V20M8.5 21h7"/>';
   return `<svg class="cicon ${size} c-${c}" viewBox="0 0 24 24" role="img" aria-label="${esc(title)}"><title>${esc(title)}</title>${shape}</svg>`;
 }
 
