@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.3.8';
+const APP_VERSION = '0.3.9';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.3.9', notes: ['Accesso a Drive con il pulsante "Accedi con Google": non serve più inserire il Client ID nelle impostazioni.'] },
   { v: '0.3.8', notes: [
     'Momento migliore per bere il vino, cercato sul web solo per i vini con annata: "Da bere dal", "Al meglio entro" e una nota.',
     'Nella lista un\'etichetta dice se il vino è da aspettare, pronto o oltre il momento migliore.',
@@ -50,7 +51,6 @@ const DEFAULT_SETTINGS = {
   // Vuoti = modello consigliato (RECOMMENDED_MODEL).
   geminiModel: '',
   detailsModel: '',
-  googleClientId: '',
   driveFolder: 'Cantina',
   search: 'auto',
   tavilyKey: '',
@@ -194,6 +194,8 @@ function blobToBase64(blob) {
 
 // ---------- Google Drive ----------
 
+// Client OAuth del progetto Google Cloud "Cantina": non è segreto, Google lo accetta solo da gorod91.github.io.
+const GOOGLE_CLIENT_ID = '1064744217533-lvklnkmf9grdhfcns6ujmg4en6khccvr.apps.googleusercontent.com';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 let tokenClient = null;
 
@@ -211,9 +213,9 @@ function driveToken() {
 }
 
 function initTokenClient() {
-  if (tokenClient || !settings.googleClientId || !window.google?.accounts?.oauth2) return tokenClient;
+  if (tokenClient || !window.google?.accounts?.oauth2) return tokenClient;
   tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: settings.googleClientId,
+    client_id: GOOGLE_CLIENT_ID,
     scope: DRIVE_SCOPE,
     callback: (resp) => {
       if (resp.error) {
@@ -232,11 +234,6 @@ function initTokenClient() {
 }
 
 function login() {
-  if (!settings.googleClientId) {
-    toast('Inserisci prima il Client ID Google nelle impostazioni.');
-    openSettings();
-    return;
-  }
   const client = initTokenClient();
   if (!client) {
     toast('Libreria Google non ancora caricata, riprova tra un attimo.');
@@ -873,7 +870,7 @@ async function addFiles(files, sameWine) {
     }
   }
   if (!settings.geminiKey) toast('Foto salvate. Inserisci la chiave Gemini nelle impostazioni per il riconoscimento.');
-  else if (!driveToken()) toast('Foto salvate sul telefono. Accedi a Drive per caricarle.');
+  else if (!driveToken()) toast('Foto salvate sul telefono. Accedi con Google per caricarle su Drive.');
 }
 
 // ---------- Interfaccia ----------
@@ -1245,7 +1242,7 @@ function bindUi() {
   $('#btn-settings').addEventListener('click', openSettings);
   $('#btn-export').addEventListener('click', exportJson);
   $('#btn-retry').addEventListener('click', () => {
-    if (!driveToken() && settings.googleClientId) login();
+    if (!driveToken() && localStorage.getItem('cantina.token')) login();
     processPending();
   });
   $('#search').addEventListener('input', scheduleRender);
@@ -1257,10 +1254,8 @@ function bindUi() {
   $('#dlg-settings').addEventListener('close', () => {
     if ($('#dlg-settings').returnValue !== 'save') return;
     const form = $('#settings-form');
-    const prevClient = settings.googleClientId;
     const prevFolder = settings.driveFolder;
     saveSettings(Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map((k) => [k, form.elements[k].value.trim()])));
-    if (prevClient !== settings.googleClientId) tokenClient = null;
     if (prevFolder !== settings.driveFolder) localStorage.removeItem('cantina.folderId');
     processPending();
     scheduleRender();

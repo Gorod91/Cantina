@@ -13,14 +13,12 @@ Prototipo attuale:
 
 ## Configurazione (una volta sola)
 
-Chiavi e token restano solo nel dispositivo, mai nel repository.
+La chiave Gemini e i token restano solo nel dispositivo, mai nel repository.
 
 1. **Chiave Gemini**: crea una chiave gratuita su <https://aistudio.google.com/apikey> e incollala in Impostazioni.
-2. **Client ID Google per Drive**:
-   1. su <https://console.cloud.google.com/> crea un progetto e abilita **Google Drive API**;
-   2. in *Google Auth Platform* configura la schermata di consenso (tipo *Esterno*) e aggiungi il tuo indirizzo Gmail tra gli utenti di test;
-   3. in *Client* crea un **ID client OAuth** di tipo *Applicazione web* con origine JavaScript autorizzata `https://gorod91.github.io`;
-   4. copia il Client ID (`…apps.googleusercontent.com`) in Impostazioni e premi "Accedi a Drive".
+2. **Drive**: premi "Accedi con Google". Il Client ID OAuth è scritto in `app.js` (`GOOGLE_CLIENT_ID`): non è segreto,
+   Google lo accetta solo dall'origine `https://gorod91.github.io`. Finché il progetto Google Cloud "Cantina" è in modalità test,
+   ogni account va aggiunto in *Google Auth Platform → Pubblico → Utenti di test*.
 
 L'app usa solo il permesso `drive.file`: vede esclusivamente i file che crea lei.
 
