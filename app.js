@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.9.4';
+const APP_VERSION = '0.9.5';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.9.5', notes: ['Tocca fuori da una finestra per chiuderla. La scheda del vino salva le modifiche come con "Salva"; Raggruppa le foto chiede prima conferma.'] },
   { v: '0.9.4', notes: ['I filtri non restano più salvati: ogni volta che riapri l\'app la cantina si vede intera.'] },
   { v: '0.9.3', notes: ['Sincronizzazione: se su Drive ci sono due copie di cantina.json (create da due dispositivi alla prima sincronizzazione) vengono unite in una, così telefono e PC tornano a vedere gli stessi vini. In fondo alla lista ora si vede anche quanti vini ci sono su Drive.'] },
   { v: '0.9.2', notes: ['PC: la scheda del vino a destra ora scorre da sola, senza far scorrere la lista.'] },
@@ -2123,6 +2124,30 @@ function bindDesk() {
   });
 }
 
+// ---------- Chiusura toccando fuori ----------
+
+// Un tocco fuori da una finestra la chiude: la scheda del vino salva come "Salva",
+// le altre si chiudono come "Annulla". Raggruppa le foto chiede prima, per non perdere le foto scelte.
+function bindOutsideClose() {
+  for (const d of document.querySelectorAll('dialog')) {
+    if (d.id === 'dlg-photo') continue;
+    d.addEventListener('click', (e) => {
+      if (e.target !== d || !d.matches(':modal')) return;
+      const r = d.getBoundingClientRect();
+      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return;
+      if (d.id === 'dlg-group' && grouping.photos.length && !confirm('Annullare l\'aggiunta di queste foto?')) return;
+      d.close(d.id === 'dlg-wine' ? 'save' : 'cancel');
+    });
+  }
+  // Su PC la scheda del vino non copre la pagina: un clic fuori, che non sia su un altro vino, la chiude salvando.
+  document.addEventListener('click', (e) => {
+    const d = $('#dlg-wine');
+    if (!d.open || d.matches(':modal') || d.contains(e.target)) return;
+    if (e.target.closest('#wine-list li[data-id], #vintages li[data-id], #diary [data-id], dialog')) return;
+    d.close('save');
+  });
+}
+
 // ---------- Selezione ed eliminazione di più vini ----------
 
 const selection = { on: false, ids: new Set() };
@@ -2755,6 +2780,7 @@ function bindUi() {
   });
   bindGrouping();
   bindSelection();
+  bindOutsideClose();
   bindCellars();
   bindDesk();
   $('#in-more').addEventListener('change', (e) => {
