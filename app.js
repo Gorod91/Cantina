@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.9.3';
+const APP_VERSION = '0.9.4';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.9.4', notes: ['I filtri non restano più salvati: ogni volta che riapri l\'app la cantina si vede intera.'] },
   { v: '0.9.3', notes: ['Sincronizzazione: se su Drive ci sono due copie di cantina.json (create da due dispositivi alla prima sincronizzazione) vengono unite in una, così telefono e PC tornano a vedere gli stessi vini. In fondo alla lista ora si vede anche quanti vini ci sono su Drive.'] },
   { v: '0.9.2', notes: ['PC: la scheda del vino a destra ora scorre da sola, senza far scorrere la lista.'] },
   { v: '0.9.1', notes: ['Cantine condivise (in prova): in Impostazioni → Cantine puoi condividere la tua cantina con un\'email Google e passare da una cantina all\'altra. Chi la riceve la aggiunge con "Aggiungi una cantina condivisa con te".'] },
@@ -1848,16 +1849,10 @@ const FILTER_KEYS = ['colore', 'stato', 'zona', 'prezzo', 'negozio'];
 const PRICE_BANDS = { basso: ['fino a 15 €', 0, 15], medio: ['15–40 €', 15, 40], alto: ['oltre 40 €', 40, Infinity] };
 const STATE_NAMES = { ok: 'Pronto', soon: 'Da bere presto', wait: 'Da aspettare', over: 'Oltre', none: 'Senza finestra' };
 
-function loadFilters() {
-  try {
-    const f = JSON.parse(localStorage.getItem('cantina.filters') || '{}');
-    return Object.fromEntries(FILTER_KEYS.map((k) => [k, Array.isArray(f[k]) ? f[k] : []]));
-  } catch { return Object.fromEntries(FILTER_KEYS.map((k) => [k, []])); }
-}
-let filters = loadFilters();
-function saveFilters() {
-  try { localStorage.setItem('cantina.filters', JSON.stringify(filters)); } catch {}
-}
+// I filtri valgono finché l'app resta aperta: a ogni apertura la cantina si vede intera.
+let filters = Object.fromEntries(FILTER_KEYS.map((k) => [k, []]));
+try { localStorage.removeItem('cantina.filters'); } catch {}
+function saveFilters() {}
 const filterCount = () => FILTER_KEYS.reduce((n, k) => n + filters[k].length, 0);
 
 const wineZone = (w) => w.data?.regione || w.data?.nazione || '';
