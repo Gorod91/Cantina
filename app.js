@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.9.2';
+const APP_VERSION = '0.9.3';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.9.3', notes: ['Sincronizzazione: se su Drive ci sono due copie di cantina.json (create da due dispositivi alla prima sincronizzazione) vengono unite in una, così telefono e PC tornano a vedere gli stessi vini. In fondo alla lista ora si vede anche quanti vini ci sono su Drive.'] },
   { v: '0.9.2', notes: ['PC: la scheda del vino a destra ora scorre da sola, senza far scorrere la lista.'] },
   { v: '0.9.1', notes: ['Cantine condivise (in prova): in Impostazioni → Cantine puoi condividere la tua cantina con un\'email Google e passare da una cantina all\'altra. Chi la riceve la aggiunge con "Aggiungi una cantina condivisa con te".'] },
   { v: '0.9.0', notes: ['Tappa 3, sincronizzazione: con Drive collegato, cantina, diario ed eliminazioni restano uguali su tutti i tuoi dispositivi. Si sincronizza a ogni modifica, quando riapri l\'app e ogni due minuti; se lo stesso vino è stato modificato in due posti vale la modifica più recente.', 'Le foto aggiunte su un altro dispositivo vengono scaricate da Drive, con miniatura e ritaglio.', 'Chiavi Gemini e Tavily e modelli scelti passano da soli agli altri tuoi dispositivi (file cantina-impostazioni.json su Drive).'] },
@@ -616,7 +617,7 @@ function updateSyncStatus(busy) {
   el.textContent = !driveToken() ? 'Drive non collegato: i dati restano su questo dispositivo'
     : busy || sync.running ? 'Sincronizzo con Drive…'
     : sync.error ? `Sincronizzazione non riuscita (${sync.error})`
-    : sync.at ? `Sincronizzata con Drive alle ${time(sync.at)}` : 'Non ancora sincronizzata';
+    : sync.at ? `Sincronizzata con Drive alle ${time(sync.at)}${sync.count != null ? ` · ${sync.count} vini su Drive` : ''}` : 'Non ancora sincronizzata';
   el.classList.toggle('err', !!sync.error && !busy);
 }
 
@@ -694,22 +695,48 @@ async function mergeList(kind, remoteList, deleted, { all, get, put, remove, fro
   return changed;
 }
 
+async function driveFindFiles(name, parent) {
+  const q = `name='${name.replace(/'/g, "\\'")}' and trashed=false and '${parent}' in parents`;
+  const res = await driveFetch(`${DRIVE_FILES}?fields=files(id)&orderBy=createdTime&q=` + encodeURIComponent(q));
+  return (res.files || []).map((f) => f.id);
+}
+
+// Più copie di cantina.json nella stessa cartella diventano una sola: per ogni vino vale la versione più recente.
+function unionRemote(copies) {
+  const pick = (lists) => {
+    const m = new Map();
+    for (const x of lists.flat()) if (!m.has(x.id) || (x.updatedAt || 0) > (m.get(x.id).updatedAt || 0)) m.set(x.id, x);
+    return [...m.values()];
+  };
+  const deleted = { wines: {}, drinks: {} };
+  for (const c of copies) for (const kind of ['wines', 'drinks']) {
+    for (const [id, t] of Object.entries(c.deleted?.[kind] || {})) deleted[kind][id] = Math.max(deleted[kind][id] || 0, t);
+  }
+  return { wines: pick(copies.map((c) => c.wines || [])), drinks: pick(copies.map((c) => c.drinks || [])), deleted };
+}
+
 async function runSync() {
   const folder = await driveFolderId();
   let cached = null;
   try { cached = JSON.parse(localStorage.getItem(cellarKey('cantina.syncFile')) || 'null'); } catch {}
-  let fileId = cached?.folder === folder ? cached.id : await driveFindFile(SYNC_FILE, folder);
-  let remote = null;
-  if (fileId) {
+  // Si cercano sempre tutte le copie: due dispositivi alla prima sincronizzazione potevano crearne una ciascuno
+  // (Drive non trova subito un file appena creato) e poi restare ognuno sulla sua.
+  let ids = await driveFindFiles(SYNC_FILE, folder);
+  if (cached?.folder === folder && cached.id && !ids.includes(cached.id)) ids.push(cached.id);
+  const copies = [];
+  const found = [];
+  for (const id of ids) {
     try {
-      remote = await (await driveBlob(fileId)).text().then(JSON.parse);
+      copies.push(JSON.parse(await (await driveBlob(id)).text()));
+      found.push(id);
     } catch (e) {
       if (e.status !== 404) throw e;
-      fileId = await driveFindFile(SYNC_FILE, folder);
-      remote = fileId ? JSON.parse(await (await driveBlob(fileId)).text()) : null;
     }
   }
-  remote ||= { wines: [], drinks: [], deleted: {} };
+  let fileId = found[0] || null;
+  const extra = found.slice(1);
+  const remote = copies.length === 1 ? copies[0] : unionRemote(copies);
+  if (extra.length) diag(`Trovate ${found.length} copie di cantina.json su Drive: le unisco in una.`, false);
 
   // Eliminazioni: vale la più recente tra le due copie.
   const local = tombstones();
@@ -736,7 +763,11 @@ async function runSync() {
     deleted: del,
   };
   const same = JSON.stringify(out) === JSON.stringify({ app: 'cantina', formato: 1, wines: byId(remote.wines || []), drinks: byId(remote.drinks || []), deleted: remote.deleted || {} });
-  if (!same) fileId = await driveWriteJson(fileId, SYNC_FILE, folder, { ...out, salvato: new Date().toISOString(), versione: APP_VERSION });
+  if (!same || extra.length) fileId = await driveWriteJson(fileId, SYNC_FILE, folder, { ...out, salvato: new Date().toISOString(), versione: APP_VERSION });
+  for (const id of extra) {
+    await driveFetch(`${DRIVE_FILES}/${id}?fields=id`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) }).catch(() => {});
+  }
+  sync.count = out.wines.length;
   localStorage.setItem(cellarKey('cantina.syncFile'), JSON.stringify({ folder, id: fileId }));
 
   await syncSettings().catch((e) => diag(`Impostazioni su Drive non sincronizzate: ${e.message}`, false));
