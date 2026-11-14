@@ -576,3 +576,7 @@ body.dropping #drop-hint {
 .cellar.on .radio { border-color: var(--wine-text); box-shadow: inset 0 0 0 3px var(--wine-soft); background: var(--wine-text); }
 #share-box { display: flex; flex-direction: column; gap: 6px; }
 .cellars input, .cellars > button, #share-box button { background: var(--card); }
+
+/* Guide e premi */
+.awards { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.awards li { padding: 4px 10px; border-radius: 99px; background: var(--wine-soft); color: var(--wine-text); font-size: 0.85rem; font-weight: 650; }

@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.9.5';
+const APP_VERSION = '0.10.0';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.10.0', notes: ['Guide e premi: la ricerca sul web cerca anche le valutazioni di Vitae AIS, Gambero Rosso, Bibenda, Veronelli, Doctor Wine, Wine Spectator, James Suckling e altri, e le mostra nella scheda del vino. Solo quelle scritte nelle fonti trovate, mai inventate.', 'Per i vini già in cantina: Modifica i dati del vino → "Aggiorna dal web" rifà solo la ricerca, senza rileggere l\'etichetta.'] },
   { v: '0.9.5', notes: ['Tocca fuori da una finestra per chiuderla. La scheda del vino salva le modifiche come con "Salva"; Raggruppa le foto chiede prima conferma.'] },
   { v: '0.9.4', notes: ['I filtri non restano più salvati: ogni volta che riapri l\'app la cantina si vede intera.'] },
   { v: '0.9.3', notes: ['Sincronizzazione: se su Drive ci sono due copie di cantina.json (create da due dispositivi alla prima sincronizzazione) vengono unite in una, così telefono e PC tornano a vedere gli stessi vini. In fondo alla lista ora si vede anche quanti vini ci sono su Drive.'] },
@@ -988,6 +989,7 @@ const FIELDS = [
   { k: 'prezzo', l: 'Prezzo stimato a bottiglia (€)', type: 'NUMBER' },
   { k: 'abbinamenti', l: 'Abbinamenti' },
   { k: 'descrizione', l: 'Descrizione' },
+  { k: 'riconoscimenti', l: 'Guide e premi (uno per voce, separati da virgola)', type: 'ARRAY' },
 ];
 
 const OPTIONS = Object.fromEntries(FIELDS.filter((f) => f.options).map((f) => [f.k, f.options]));
@@ -1284,7 +1286,8 @@ async function geminiDetails(data, hooks, mode) {
     intro = `Cerca su Google la scheda tecnica di questo vino: ${who}.${data.annata ? `
 Cerca anche il momento migliore per berlo (finestra di consumo, "drinking window") dell'annata ${data.annata}.` : ''}
 Cerca per esempio: ${searchQuery(data)} (includi sempre la parola "vino" nella lingua del paese di origine, altrimenti trovi pagine che non parlano di vino).
-Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.`;
+Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata specifica non si trova, usa la scheda più recente dello stesso vino.
+Cerca anche le valutazioni delle guide e dei critici${data.annata ? ` per l'annata ${data.annata}` : ''}: Vitae AIS (viti), Gambero Rosso (bicchieri), Bibenda (grappoli), Veronelli, Doctor Wine, Luca Maroni, Wine Spectator, James Suckling, Robert Parker, Decanter.`;
   } else if (mode === 'tavily') {
     const lang = searchLang(data);
     const found = await tavilySearch(searchQuery(data), lang.country, hooks.log, hooks.cost);
@@ -1293,6 +1296,9 @@ Preferisci il sito del produttore, poi enoteche e guide affidabili. Se l'annata 
       const more = await tavilySearch(`${searchQuery(data)} ${lang.window || 'drinking window'}`, null, hooks.log, hooks.cost).catch(() => []);
       found.push(...more.filter((r) => !found.some((f) => f.uri === r.uri)));
     }
+    // Terza ricerca per guide e premi: le enoteche li citano spesso nella scheda del vino.
+    const awards = await tavilySearch(`${searchQuery(data)} Vitae AIS viti Gambero Rosso bicchieri Bibenda punteggio premi`, null, hooks.log, hooks.cost).catch(() => []);
+    found.push(...awards.filter((r) => !found.some((f) => f.uri === r.uri)));
     sources = relevantResults(found, data);
     if (sources.length < found.length) hooks.log?.(`Tavily · scartati ${found.length - sources.length} risultati che non nominano il vino`, '');
     intro = `Compila la scheda di questo vino: ${who}.
@@ -1306,6 +1312,7 @@ Caratteristiche: solo se certe, per esempio biologico, biodinamico, naturale, se
 ${data.annata
     ? `Momento migliore per bere l'annata ${data.annata}: "bere_dal" e "bere_entro" sono gli anni (interi) della finestra ideale, presi preferibilmente da produttore, critici o guide (drinking window); se le fonti non ne parlano stimali da tipo, denominazione e annata e non metterli in "confermati". "finestra_consumo" è una breve nota, per esempio "al massimo tra il 2027 e il 2032, regge fino al 2036".`
     : '"bere_dal", "bere_entro" e "finestra_consumo" valgono null: l\'annata non è nota.'}
+"riconoscimenti" è un elenco di stringhe con le valutazioni di guide e critici autorevoli, una per voce, nella forma "Guida edizione: valutazione", per esempio "Vitae AIS 2025: 4 viti", "Gambero Rosso 2024: Tre Bicchieri", "Bibenda 2025: 5 grappoli", "Veronelli: 93/100", "James Suckling: 94/100". Riporta solo valutazioni scritte nelle fonti${mode === 'none' ? ' (senza fonti lascia null)' : ''}, mai stimate o inventate; se una valutazione riguarda un'annata diversa${data.annata ? ` dalla ${data.annata}` : ''} aggiungi "(annata AAAA)". Nessuna valutazione trovata: null.
 "descrizione" al massimo due frasi. Rispondi in italiano.`;
   const { text, grounding } = await geminiFast({
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -2475,6 +2482,13 @@ function renderWineHead(w) {
   ].filter(Boolean).join('');
   $('#wine-table').innerHTML = table ? `<span class="label">In tavola</span>${table}` : '';
   $('#wine-table').hidden = !table;
+
+  const awards = Array.isArray(d.riconoscimenti) ? d.riconoscimenti.filter(Boolean) : d.riconoscimenti ? [d.riconoscimenti] : [];
+  const unsure = (w.uncertain || []).includes('riconoscimenti');
+  $('#wine-awards').innerHTML = awards.length
+    ? `<span class="label">Guide e premi</span><ul class="awards">${awards.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>${unsure ? '<p class="hint">Trovati sul web ma senza una fonte sicura: da verificare.</p>' : ''}`
+    : '';
+  $('#wine-awards').hidden = !awards.length;
 }
 
 // Modulo di modifica diviso per argomento; i campi corti stanno due per riga.
@@ -2483,10 +2497,11 @@ const FIELD_GROUPS = [
   ['Caratteristiche', ['colore', 'stile', 'vitigni', 'gradazione', 'formato_ml', 'caratteristiche', 'affinamento']],
   ['Quando berlo', ['bere_dal', 'bere_entro', 'finestra_consumo']],
   ['In tavola', ['temperatura_servizio', 'abbinamenti', 'descrizione']],
+  ['Guide e premi', ['riconoscimenti']],
   ['In cantina', ['quantita', 'prezzo_pagato', 'acquisto_data', 'prezzo', 'acquisto_luogo', 'posizione']],
 ];
 const SHORT_FIELDS = new Set(['classificazione', 'annata', 'nazione', 'regione', 'colore', 'stile', 'gradazione', 'formato_ml', 'bere_dal', 'bere_entro', 'temperatura_servizio', 'quantita', 'prezzo', 'prezzo_pagato', 'acquisto_data']);
-const LONG_TEXT = new Set(['abbinamenti', 'descrizione', 'finestra_consumo', 'affinamento']);
+const LONG_TEXT = new Set(['abbinamenti', 'descrizione', 'finestra_consumo', 'affinamento', 'riconoscimenti']);
 
 function autosize(t) {
   t.style.height = 'auto';
@@ -2944,6 +2959,16 @@ function bindUi() {
     if (!settings.geminiKey) return toast('Manca la chiave Gemini nelle impostazioni.');
     await updateWine(id, { status: 'new' });
     processWine(id);
+  });
+  // Rifà solo la ricerca sul web (dettagli, guide e premi), senza rileggere l'etichetta.
+  $('#btn-web').addEventListener('click', async () => {
+    const id = editingId;
+    await updateWine(id, readForm);
+    $('#dlg-wine').close();
+    if (!settings.geminiKey) return toast('Manca la chiave Gemini nelle impostazioni.');
+    await updateWine(id, { status: 'details' });
+    processWine(id);
+    toast('Cerco di nuovo sul web, anche guide e premi.');
   });
   $('#btn-delete').addEventListener('click', async () => {
     if (!confirm('Eliminare questo vino dall\'app? Le foto su Drive restano.')) return;
