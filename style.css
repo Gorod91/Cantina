@@ -467,6 +467,17 @@ dialog.sheet.with-bar::before { display: none; }
 .hero.two img, .hero.two .lost { flex: 1 1 0; min-width: 0; height: 240px; }
 .hero.many img, .hero.many .lost { width: 40%; height: 220px; }
 .hero.two, .hero.many { justify-content: flex-start; }
+/* Più foto: ognuna con la stellina per sceglierla come principale */
+.hero .hp { position: relative; flex: none; scroll-snap-align: center; display: flex; }
+.hero.two .hp { flex: 1 1 0; min-width: 0; }
+.hero.many .hp { width: 40%; }
+.hero .hp img, .hero .hp .lost { width: 100%; }
+.hp-main {
+  position: absolute; left: 6px; bottom: 6px; min-width: 34px; height: 34px; padding: 0 10px;
+  display: flex; align-items: center; justify-content: center; border-radius: 17px;
+  border: 0; font: inherit; font-size: 1.05rem; line-height: 1; color: #fff; background: rgba(0, 0, 0, 0.55);
+}
+.hp-main.on { font-size: 0.72rem; font-weight: 700; background: var(--wine); pointer-events: none; }
 
 /* Selezione di più vini da eliminare */
 .sort-acts { display: flex; gap: 14px; }
