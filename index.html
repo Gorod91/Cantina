@@ -155,11 +155,16 @@
     </form>
   </dialog>
 
-  <dialog id="dlg-drink" class="sheet">
+  <dialog id="dlg-drink" class="sheet with-bar">
     <form method="dialog" id="drink-form">
+      <div class="sheet-bar">
+        <button value="cancel" formnovalidate class="bar-btn">Chiudi</button>
+        <span class="grab"></span>
+        <button value="save" class="bar-btn strong">Salva</button>
+      </div>
       <div class="hero" id="drink-photos" hidden></div>
       <div class="wine-head">
-        <h2 class="wname" id="drink-title">Bevuta</h2>
+        <h2 class="wname" id="drink-title" tabindex="-1" autofocus>Bevuta</h2>
         <small id="drink-sub" class="wsub"></small>
       </div>
       <label id="drink-name">Vino

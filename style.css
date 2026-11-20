@@ -248,6 +248,9 @@ dialog.sheet {
   border-radius: 22px 22px 0 0;
   padding: 10px 16px calc(env(safe-area-inset-bottom) + 16px);
 }
+/* I fogli scorrono solo in verticale (su iOS il campo data può allargarsi oltre lo schermo) */
+dialog.sheet { overflow-x: hidden; overscroll-behavior-x: none; }
+dialog input[type=date] { display: block; min-width: 0; max-width: 100%; -webkit-appearance: none; appearance: none; }
 dialog.sheet::before { content: ""; display: block; width: 40px; height: 5px; margin: 0 auto 12px; border-radius: 3px; background: var(--line); }
 dialog.sheet > form { display: flex; flex-direction: column; gap: 12px; }
 dialog.sheet .actions button { flex: 1; }
@@ -569,6 +572,9 @@ body.dropping #drop-hint {
   /* Gli altri fogli diventano finestre al centro */
   dialog.sheet:not(#dlg-wine) { margin: auto; border-radius: 18px; padding: 20px 22px; max-height: 86dvh; }
   dialog.sheet:not(#dlg-wine)::before { display: none; }
+  #dlg-drink { padding-top: 0; }
+  #dlg-drink .sheet-bar { margin: 0 -22px; }
+  #dlg-drink .sheet-bar .grab { visibility: hidden; }
   #dlg-group { max-width: 760px; }
   #group-list { grid-template-columns: repeat(4, 1fr); }
   #group-list li.multi { grid-column: span 2; }

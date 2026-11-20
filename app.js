@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.10.3';
+const APP_VERSION = '0.10.4';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.10.4', notes: ['Bevuta aperta dal diario: in alto ci sono Chiudi e Salva sempre a portata di dito, e la finestra scorre solo in verticale, senza spostarsi di lato.'] },
   { v: '0.10.3', notes: ['Guide e premi: non spariscono più se chiudi la scheda del vino mentre la ricerca sul web è ancora in corso, e compaiono da sole nella scheda aperta appena la ricerca finisce.', '"Aggiorna dal web" funziona anche sui vini le cui foto non sono ancora scaricate da Drive.', 'Nei dati del vino le guide si scrivono una per riga.'] },
   { v: '0.10.2', notes: ['Diario: aprendo una bottiglia bevuta ora vedi tutta la scheda del vino (foto, quando berlo, il vino, in tavola, guide e premi, le tue note, acquisto e altre bevute), sotto ai dati della bevuta. "Apri la scheda del vino" porta alla scheda in cantina.'] },
   { v: '0.10.1', notes: ['Foto principale: se un vino ha più foto, nella scheda tocca la stellina ☆ su una foto per renderla la principale. È quella che si vede nella lista, nel diario e in cima alla scheda, e passa agli altri dispositivi con la sincronizzazione.'] },
