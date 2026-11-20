@@ -349,17 +349,26 @@ input[type=search]::-webkit-search-decoration { -webkit-appearance: none; }
 button.accent { background: var(--wine-soft); color: var(--wine-text); font-weight: 700; }
 .hero { justify-content: safe center; }
 
-/* Scheda vino: barra fissa in alto con Annulla e Salva */
+/* Barra fissa in alto: ‹ Indietro, titolo, azione */
 dialog.sheet.with-bar { padding-top: 0; }
 dialog.sheet.with-bar::before { display: none; }
 .sheet-bar {
   position: sticky; top: 0; z-index: 2;
-  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
-  margin: 0 -16px; padding: 8px 8px;
-  background: var(--card); border-bottom: 1px solid var(--line);
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 4px;
+  margin: 0 -16px; padding: 6px 6px;
+  background: var(--card); border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
 }
-.sheet-bar .grab { width: 40px; height: 5px; border-radius: 3px; background: var(--line); }
+dialog.scrolled .sheet-bar { border-bottom-color: var(--line); }
+.bar-title {
+  max-width: 52vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 700; font-size: 1rem; opacity: 0; transition: opacity 0.2s;
+}
+dialog.scrolled .bar-title { opacity: 1; }
 .bar-btn { background: none; padding: 8px 10px; color: var(--wine-text); font-weight: 600; justify-self: start; }
+.bar-btn.back { display: flex; align-items: center; gap: 5px; padding-left: 6px; font-weight: 500; font-size: 1.02rem; max-width: 100%; }
+.bar-btn.back svg { flex: none; width: 12px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.bar-btn.back .back-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-btn.strong { justify-self: end; font-weight: 800; }
 .check { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border-radius: 12px; background: var(--wait-soft); color: var(--wait); font-size: 0.85rem; }
 .check .link { color: var(--wait); font-weight: 700; white-space: nowrap; }
@@ -517,6 +526,24 @@ body.dropping #drop-hint {
   color: var(--wine-text); font-size: 1.3rem; font-weight: 800; pointer-events: none;
 }
 
+/* Telefono e tablet: i fogli sono pagine che entrano da destra, come le Impostazioni di iOS */
+@media (max-width: 999px) {
+  dialog.sheet, dialog.sheet.leaving {
+    position: fixed; inset: 0; margin: 0;
+    width: 100%; max-width: none; height: 100vh; height: 100dvh; max-height: none;
+    border: 0; border-radius: 0;
+    padding: 0 16px calc(env(safe-area-inset-bottom) + 28px);
+    overflow-y: auto; overscroll-behavior: contain;
+    box-shadow: -14px 0 28px -12px rgba(0, 0, 0, 0.7);
+  }
+  dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.35); }
+  dialog.sheet > form { max-width: 640px; margin: 0 auto; }
+  dialog.sheet .sheet-bar { padding-top: calc(env(safe-area-inset-top) + 4px); }
+  /* Pagina che esce: resta visibile sopra il resto finché non è scivolata via */
+  dialog.sheet.leaving::backdrop { background: transparent; }
+  dialog.sheet.leaving { display: block; pointer-events: none; color: var(--fg); background: var(--card); }
+}
+
 @media (min-width: 1000px) {
   :root { --side: 220px; --panel: 440px; }
   body { padding-left: var(--side); }
@@ -567,14 +594,12 @@ body.dropping #drop-hint {
     border-radius: 0; border-left: 1px solid var(--line); box-shadow: -20px 0 40px -30px rgba(0, 0, 0, 0.8);
     overflow-y: auto; overscroll-behavior: contain;
   }
-  #dlg-wine:not(:modal) .sheet-bar .grab { visibility: hidden; }
 
   /* Gli altri fogli diventano finestre al centro */
   dialog.sheet:not(#dlg-wine) { margin: auto; border-radius: 18px; padding: 20px 22px; max-height: 86dvh; }
   dialog.sheet:not(#dlg-wine)::before { display: none; }
-  #dlg-drink { padding-top: 0; }
-  #dlg-drink .sheet-bar { margin: 0 -22px; }
-  #dlg-drink .sheet-bar .grab { visibility: hidden; }
+  dialog.sheet:not(#dlg-wine) { padding-top: 0; }
+  dialog.sheet:not(#dlg-wine) .sheet-bar { margin: 0 -22px; }
   #dlg-group { max-width: 760px; }
   #group-list { grid-template-columns: repeat(4, 1fr); }
   #group-list li.multi { grid-column: span 2; }

@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.10.4';
+const APP_VERSION = '0.11.0';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.11.0', notes: ['Su telefono le schede non salgono più dal basso: sono pagine che entrano da destra, come le Impostazioni di iOS, con ‹ Indietro in alto a sinistra e il titolo che compare scorrendo.', 'Per tornare indietro strisci da sinistra verso destra in qualunque punto della pagina; la pagina segue il dito.', 'Indietro (pulsante o strisciata) salva, come in iOS: scheda del vino, bevuta e impostazioni non perdono le modifiche. Raggruppa le foto invece annulla, dopo averlo chiesto.', 'Segna bevuta dalla scheda del vino apre la bevuta come pagina successiva.'] },
   { v: '0.10.4', notes: ['Bevuta aperta dal diario: in alto ci sono Chiudi e Salva sempre a portata di dito, e la finestra scorre solo in verticale, senza spostarsi di lato.'] },
   { v: '0.10.3', notes: ['Guide e premi: non spariscono più se chiudi la scheda del vino mentre la ricerca sul web è ancora in corso, e compaiono da sole nella scheda aperta appena la ricerca finisce.', '"Aggiorna dal web" funziona anche sui vini le cui foto non sono ancora scaricate da Drive.', 'Nei dati del vino le guide si scrivono una per riga.'] },
   { v: '0.10.2', notes: ['Diario: aprendo una bottiglia bevuta ora vedi tutta la scheda del vino (foto, quando berlo, il vino, in tavola, guide e premi, le tue note, acquisto e altre bevute), sotto ai dati della bevuta. "Apri la scheda del vino" porta alla scheda in cantina.'] },
@@ -2184,6 +2185,168 @@ function bindOutsideClose() {
   });
 }
 
+// ---------- Pagine in stile Impostazioni di iOS ----------
+
+// Su telefono e tablet i fogli sono pagine a tutto schermo che entrano da destra.
+// In alto: ‹ Indietro (col nome della pagina sotto), titolo che compare scorrendo, azione.
+// Indietro, o una strisciata da sinistra verso destra, torna alla pagina sotto:
+// la scheda del vino, la bevuta e le impostazioni salvano (come in iOS), Raggruppa annulla.
+const isPage = () => !isDesk();
+const pageStack = [];
+const topPage = (except) => pageStack.filter((x) => x.open && x !== except).at(-1);
+const PAGE_NAMES = { 'dlg-wine': 'Vino', 'dlg-drink': 'Bevuta', 'dlg-settings': 'Impostazioni', 'dlg-filters': 'Filtri', 'dlg-group': 'Foto', 'dlg-notes': 'Novità' };
+const EASE = 'cubic-bezier(0.2, 0.8, 0.2, 1)';
+let leavingPage = null; // { d, anim, at }
+
+function pageBack(d) {
+  const v = d.querySelector('[data-back]')?.dataset.back || 'cancel';
+  if (d.id === 'dlg-group' && grouping.photos.length && !confirm('Annullare l\'aggiunta di queste foto?')) return false;
+  d.close(v);
+  return true;
+}
+
+function updatePageTitle(d) {
+  const bar = d.querySelector('.sheet-bar');
+  if (!bar) return;
+  const head = d.querySelector('.wname, h2');
+  const t = bar.querySelector('.bar-title');
+  if (head && (d.id === 'dlg-wine' || d.id === 'dlg-drink')) t.textContent = head.textContent.trim() || PAGE_NAMES[d.id];
+  const scrolled = head ? head.getBoundingClientRect().bottom < bar.getBoundingClientRect().bottom + 4 : d.scrollTop > 40;
+  d.classList.toggle('scrolled', scrolled);
+}
+
+function endLeaving() {
+  const l = leavingPage;
+  if (!l) return;
+  leavingPage = null;
+  l.anim?.cancel();
+  try { l.d.hidePopover(); } catch {}
+  l.d.removeAttribute('popover');
+  l.d.classList.remove('leaving');
+  l.d.style.transform = '';
+}
+
+// La pagina chiusa resta un attimo visibile (nel livello più alto, come popover) mentre scivola a destra.
+function slideOut(d, from, top) {
+  endLeaving();
+  if (!HTMLElement.prototype.showPopover) return;
+  try {
+    d.setAttribute('popover', 'manual');
+    d.classList.add('leaving');
+    d.showPopover();
+    d.scrollTop = top;
+    const w = d.getBoundingClientRect().width || innerWidth;
+    const ms = Math.max(140, 300 * (1 - from / w));
+    const anim = d.animate([{ transform: `translateX(${from}px)` }, { transform: 'translateX(100%)' }], { duration: ms, easing: EASE, fill: 'forwards' });
+    leavingPage = { d, anim, at: performance.now() };
+    anim.finished.then(() => { if (leavingPage?.anim === anim) endLeaving(); }, () => {});
+  } catch {
+    endLeaving();
+  }
+}
+
+function bindPages() {
+  for (const d of document.querySelectorAll('dialog.sheet')) {
+    const show = d.showModal.bind(d);
+    const close = d.close.bind(d);
+    d.showModal = () => {
+      // Una pagina che si apre subito dopo averne chiusa un'altra (es. Segna bevuta dalla scheda del vino)
+      // entra sopra quella, ferma, come una pagina successiva; la stessa pagina che si riapre prende il suo posto.
+      const prev = leavingPage && leavingPage.d !== d && performance.now() - leavingPage.at < 600 ? leavingPage : null;
+      if (prev) { prev.anim.cancel(); prev.d.style.transform = 'translateX(0)'; prev.anim = null; }
+      else endLeaving();
+      const under = topPage(d);
+      const label = under ? PAGE_NAMES[under.id] : (document.querySelector('.tab.on')?.textContent.trim() || 'Indietro');
+      const back = d.querySelector('.back-label');
+      if (back) back.textContent = label.length > 12 ? 'Indietro' : label;
+      d.classList.remove('scrolled');
+      d.style.transform = '';
+      show();
+      if (pageStack.includes(d)) pageStack.splice(pageStack.indexOf(d), 1);
+      pageStack.push(d);
+      requestAnimationFrame(() => updatePageTitle(d));
+      if (!isPage()) return;
+      const anim = d.animate([{ transform: 'translateX(100%)' }, { transform: 'translateX(0)' }], { duration: 340, easing: EASE });
+      if (prev) anim.finished.then(endLeaving, endLeaving);
+    };
+    d.close = (v) => {
+      if (!d.open) return;
+      const page = isPage() && d.matches(':modal');
+      const m = /translateX\(([-\d.]+)px\)/.exec(d.style.transform);
+      const from = m ? Math.max(0, Number(m[1])) : 0;
+      const top = d.scrollTop;
+      d.style.transform = '';
+      close(v);
+      if (page) slideOut(d, from, top);
+    };
+    d.addEventListener('close', () => {
+      const i = pageStack.indexOf(d);
+      if (i >= 0 && !d.open) pageStack.splice(i, 1);
+    });
+    // I pulsanti del form (method="dialog") chiudono passando dalla stessa strada, con l'animazione.
+    d.querySelector('form')?.addEventListener('submit', (e) => {
+      if (e.target.method !== 'dialog') return;
+      e.preventDefault();
+      d.close(e.submitter?.value ?? '');
+    });
+    d.querySelector('[data-back]')?.addEventListener('click', () => pageBack(d));
+    d.addEventListener('scroll', () => updatePageTitle(d), { passive: true });
+  }
+  bindPageSwipe();
+}
+
+// Strisciata da sinistra verso destra su una pagina: la pagina segue il dito e, lasciata oltre un terzo
+// (o con uno scatto veloce), torna a quella sotto. Le foto che scorrono di lato e il cursore del voto hanno la precedenza.
+function bindPageSwipe() {
+  let g = null;
+  const canScrollLeft = (el, d) => {
+    for (; el && el !== d; el = el.parentElement) {
+      if (el.scrollWidth > el.clientWidth + 1 && el.scrollLeft > 0 && /(auto|scroll)/.test(getComputedStyle(el).overflowX)) return true;
+    }
+    return false;
+  };
+  document.addEventListener('touchstart', (e) => {
+    g = null;
+    if (!isPage() || e.touches.length !== 1) return;
+    const d = topPage();
+    if (!d || !d.open || !d.matches(':modal') || !d.contains(e.target)) return;
+    if (e.target.closest('input[type=range], #viewer') || canScrollLeft(e.target, d)) return;
+    const t = e.touches[0];
+    g = { d, x0: t.clientX, y0: t.clientY, dx: 0, lock: null, t: performance.now(), v: 0, lastX: t.clientX, lastT: performance.now() };
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (!g) return;
+    const t = e.touches[0];
+    const dx = t.clientX - g.x0;
+    const dy = t.clientY - g.y0;
+    if (!g.lock) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      g.lock = dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
+      if (g.lock === 'y') { g = null; return; }
+      document.activeElement?.blur?.();
+    }
+    e.preventDefault();
+    const now = performance.now();
+    g.v = (t.clientX - g.lastX) / Math.max(1, now - g.lastT);
+    g.lastX = t.clientX;
+    g.lastT = now;
+    g.dx = Math.max(0, dx);
+    g.d.style.transform = `translateX(${g.dx}px)`;
+  }, { passive: false });
+  const end = () => {
+    if (!g || g.lock !== 'x') { g = null; return; }
+    const { d, dx, v } = g;
+    g = null;
+    const w = d.getBoundingClientRect().width;
+    if ((dx > w / 3 || v > 0.5) && v > -0.2 && pageBack(d)) return;
+    const anim = d.animate([{ transform: `translateX(${dx}px)` }, { transform: 'translateX(0)' }], { duration: 220, easing: EASE });
+    d.style.transform = '';
+    anim.finished.catch(() => {});
+  };
+  document.addEventListener('touchend', end);
+  document.addEventListener('touchcancel', end);
+}
+
 // ---------- Selezione ed eliminazione di più vini ----------
 
 const selection = { on: false, ids: new Set() };
@@ -2913,6 +3076,7 @@ function bindUi() {
   bindGrouping();
   bindSelection();
   bindOutsideClose();
+  bindPages();
   bindCellars();
   bindDesk();
   $('#in-more').addEventListener('change', (e) => {

@@ -130,8 +130,13 @@
     <button type="button" id="btn-select-delete" class="primary" disabled>Elimina</button>
   </div>
 
-  <dialog id="dlg-group" class="sheet">
+  <dialog id="dlg-group" class="sheet with-bar">
     <form method="dialog">
+      <div class="sheet-bar">
+        <button type="button" class="bar-btn back" data-back="cancel"><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg><span class="back-label">Indietro</span></button>
+        <span class="bar-title">Raggruppa le foto</span>
+        <span></span>
+      </div>
       <h2>Raggruppa le foto</h2>
       <p class="hint" id="group-status"></p>
       <ul id="group-list"></ul>
@@ -147,9 +152,14 @@
     </form>
   </dialog>
 
-  <dialog id="dlg-filters" class="sheet">
+  <dialog id="dlg-filters" class="sheet with-bar">
     <form method="dialog">
-      <div class="row"><h2>Filtri</h2><button type="button" id="btn-filter-reset" class="link">Azzera</button></div>
+      <div class="sheet-bar">
+        <button type="button" class="bar-btn back" data-back="ok"><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg><span class="back-label">Indietro</span></button>
+        <span class="bar-title">Filtri</span>
+        <button type="button" id="btn-filter-reset" class="bar-btn strong">Azzera</button>
+      </div>
+      <h2>Filtri</h2>
       <div id="filter-body"></div>
       <div class="actions"><button value="ok" class="primary" id="btn-filter-apply">Mostra</button></div>
     </form>
@@ -158,8 +168,8 @@
   <dialog id="dlg-drink" class="sheet with-bar">
     <form method="dialog" id="drink-form">
       <div class="sheet-bar">
-        <button value="cancel" formnovalidate class="bar-btn">Chiudi</button>
-        <span class="grab"></span>
+        <button type="button" class="bar-btn back" data-back="save"><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg><span class="back-label">Indietro</span></button>
+        <span class="bar-title">Bevuta</span>
         <button value="save" class="bar-btn strong">Salva</button>
       </div>
       <div class="hero" id="drink-photos" hidden></div>
@@ -200,8 +210,8 @@
   <dialog id="dlg-wine" class="sheet with-bar">
     <form method="dialog" id="wine-form">
       <div class="sheet-bar">
-        <button value="cancel" formnovalidate class="bar-btn">Annulla</button>
-        <span class="grab"></span>
+        <button type="button" class="bar-btn back" data-back="save"><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg><span class="back-label">Indietro</span></button>
+        <span class="bar-title">Vino</span>
         <button value="save" class="bar-btn strong">Salva</button>
       </div>
       <div class="hero" id="wine-photos"></div>
@@ -258,8 +268,13 @@
     </form>
   </dialog>
 
-  <dialog id="dlg-settings" class="sheet">
+  <dialog id="dlg-settings" class="sheet with-bar">
     <form method="dialog" id="settings-form">
+      <div class="sheet-bar">
+        <button type="button" class="bar-btn back" data-back="save"><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg><span class="back-label">Indietro</span></button>
+        <span class="bar-title">Impostazioni</span>
+        <button value="save" class="bar-btn strong">Salva</button>
+      </div>
       <h2>Impostazioni</h2>
       <section class="cellars">
         <span class="label">Cantine</span>
@@ -308,8 +323,13 @@
     </form>
   </dialog>
 
-  <dialog id="dlg-notes" class="sheet">
+  <dialog id="dlg-notes" class="sheet with-bar">
     <form method="dialog">
+      <div class="sheet-bar">
+        <button type="button" class="bar-btn back" data-back="close"><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg><span class="back-label">Indietro</span></button>
+        <span class="bar-title">Note di rilascio</span>
+        <span></span>
+      </div>
       <h2>Note di rilascio</h2>
       <div id="notes-list"></div>
       <div class="actions"><button value="close" class="primary">Chiudi</button></div>
