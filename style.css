@@ -138,6 +138,9 @@ input[type=checkbox], input[type=radio] { width: auto; }
 #wine-list li { position: relative; overflow: hidden; }
 /* Zoom a due dita: --lz ingrandisce foto e righe, il testo resta della sua grandezza. */
 :root { --lz: 1; }
+/* Durante il pizzico niente scorrimento né animazioni che facciano tremare la lista. */
+html.pinching, html.pinching body { overscroll-behavior: none; }
+html.pinching #wine-list * { transition: none !important; }
 #wine-list { --lzt: calc(1 + (var(--lz) - 1) * 0.3); font-size: 1rem; }
 #wine-list li + li, .entries li + li { border-top: 1px solid var(--line); }
 #wine-list li.empty { padding: 16px; color: var(--muted); }

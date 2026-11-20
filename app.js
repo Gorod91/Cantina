@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.11.1';
+const APP_VERSION = '0.11.2';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.11.2', notes: ['Zoom della cantina più stabile: mentre pizzichi la pagina non scorre più insieme alle dita e il vino che hai sotto le dita resta fermo.'] },
   { v: '0.11.1', notes: ['Zoom della cantina: ingrandendo la lista crescono solo foto e righe, il testo resta della sua grandezza.'] },
   { v: '0.11.0', notes: ['Zoom della cantina: pizzica la lista con due dita per ingrandire o rimpicciolire le foto e le righe dei vini (il testo resta della stessa grandezza). Il livello resta salvato su questo dispositivo finché non lo cambi di nuovo. Su PC: pizzico sul trackpad o Ctrl + rotellina sulla lista.'] },
   { v: '0.10.4', notes: ['Bevuta aperta dal diario: in alto ci sono Chiudi e Salva sempre a portata di dito, e la finestra scorre solo in verticale, senza spostarsi di lato.'] },
@@ -2134,9 +2135,10 @@ let listPinching = false;
 
 function setListZoom(z, save) {
   listZoom = Math.min(LIST_ZOOM_MAX, Math.max(LIST_ZOOM_MIN, Math.round(z * 100) / 100));
-  const list = $('#wine-list');
-  document.documentElement.style.setProperty('--lz', listZoom);
-  list.classList.toggle('zoom-big', listZoom >= 1.6);
+  // La variabile sta solo sulla vista Cantina: cambiarla non ricalcola tutta la pagina a ogni movimento.
+  $('#view-cellar').style.setProperty('--lz', listZoom);
+  // Il testo che va a capo cambia l'altezza delle righe a scatti: si decide solo a gesto finito.
+  if (save || !listPinching) $('#wine-list').classList.toggle('zoom-big', listZoom >= 1.6);
   if (save) try { localStorage.setItem('cantina.listZoom', String(listZoom)); } catch { /* solo per questa volta */ }
 }
 
@@ -2146,40 +2148,65 @@ function bindListZoom() {
   try { saved = Number(localStorage.getItem('cantina.listZoom')) || 1; } catch { /* resta 1 */ }
   setListZoom(saved, false);
 
-  // Mentre si zooma resta fermo il vino sotto le dita.
+  // Mentre si zooma il vino sotto le dita resta sotto le dita.
   let anchor = null;
   const pickAnchor = (y) => {
     const li = document.elementFromPoint(window.innerWidth / 2, y)?.closest('#wine-list li') || list.querySelector('li');
     anchor = li ? { li, y, off: (y - li.getBoundingClientRect().top) / (li.offsetHeight || 1) } : null;
   };
+  const keepAnchor = () => {
+    if (!anchor?.li.isConnected) return;
+    const r = anchor.li.getBoundingClientRect();
+    const dy = Math.round(r.top + anchor.off * anchor.li.offsetHeight - anchor.y);
+    if (dy) window.scrollTo(0, window.scrollY + dy);
+  };
+  // Un solo aggiornamento per fotogramma, qualunque sia il numero di eventi del dito.
+  let want = null;
+  let frame = 0;
   const zoomTo = (z) => {
-    setListZoom(z, false);
-    if (anchor?.li.isConnected) {
-      const r = anchor.li.getBoundingClientRect();
-      window.scrollBy(0, r.top + anchor.off * anchor.li.offsetHeight - anchor.y);
-    }
+    want = z;
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      if (want == null) return;
+      const before = listZoom;
+      setListZoom(want, false);
+      want = null;
+      if (listZoom !== before) keepAnchor();
+    });
   };
   const finish = () => {
+    if (frame) { cancelAnimationFrame(frame); frame = 0; }
+    if (want != null) setListZoom(want, false);
+    want = null;
     listPinching = false;
-    anchor = null;
     setListZoom(listZoom, true);
+    keepAnchor();
+    anchor = null;
+    document.documentElement.classList.remove('pinching');
   };
 
-  // iPhone e Android: due dita sulla lista.
+  // iPhone e Android: due dita sulla lista. La pagina non scorre finché le dita sono due.
   let d0 = 0;
   let z0 = 1;
   const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   list.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 2) return;
+    if (e.cancelable) e.preventDefault();
     listPinching = true;
+    document.documentElement.classList.add('pinching');
     d0 = dist(e.touches) || 1;
     z0 = listZoom;
     pickAnchor((e.touches[0].clientY + e.touches[1].clientY) / 2);
-  }, { passive: true });
+  }, { passive: false });
   list.addEventListener('touchmove', (e) => {
-    if (!listPinching || e.touches.length < 2) return;
-    e.preventDefault();
-    zoomTo(z0 * dist(e.touches) / d0);
+    if (!listPinching) return;
+    if (e.cancelable) e.preventDefault();
+    if (e.touches.length < 2) return;
+    const ratio = dist(e.touches) / d0;
+    // Piccoli tremolii delle dita non cambiano lo zoom.
+    if (Math.abs(ratio - 1) < 0.03 && listZoom === z0) return;
+    zoomTo(z0 * ratio);
   }, { passive: false });
   const touchEnd = (e) => { if (listPinching && e.touches.length < 2) finish(); };
   list.addEventListener('touchend', touchEnd);
@@ -2202,7 +2229,7 @@ function bindListZoom() {
     if (!e.ctrlKey) return;
     e.preventDefault();
     if (!wheelTimer) pickAnchor(e.clientY);
-    zoomTo(listZoom * Math.exp(-e.deltaY / 200));
+    zoomTo((want ?? listZoom) * Math.exp(-e.deltaY / 200));
     clearTimeout(wheelTimer);
     wheelTimer = setTimeout(() => { wheelTimer = 0; finish(); }, 300);
   }, { passive: false });
