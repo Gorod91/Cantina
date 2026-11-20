@@ -1,10 +1,11 @@
 'use strict';
 
-const APP_VERSION = '0.10.1';
+const APP_VERSION = '0.10.2';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
-  { v: '0.10.1', notes: ['Guide e premi: non spariscono più se chiudi la scheda del vino mentre la ricerca sul web è ancora in corso, e compaiono da sole nella scheda aperta appena la ricerca finisce.', '"Aggiorna dal web" funziona anche sui vini le cui foto non sono ancora scaricate da Drive.', 'Nei dati del vino le guide si scrivono una per riga.'] },
+  { v: '0.10.2', notes: ['Guide e premi: non spariscono più se chiudi la scheda del vino mentre la ricerca sul web è ancora in corso, e compaiono da sole nella scheda aperta appena la ricerca finisce.', '"Aggiorna dal web" funziona anche sui vini le cui foto non sono ancora scaricate da Drive.', 'Nei dati del vino le guide si scrivono una per riga.'] },
+  { v: '0.10.1', notes: ['Foto principale: se un vino ha più foto, nella scheda tocca la stellina ☆ su una foto per renderla la principale. È quella che si vede nella lista, nel diario e in cima alla scheda, e passa agli altri dispositivi con la sincronizzazione.'] },
   { v: '0.10.0', notes: ['Guide e premi: la ricerca sul web cerca anche le valutazioni di Vitae AIS, Gambero Rosso, Bibenda, Veronelli, Doctor Wine, Wine Spectator, James Suckling e altri, e le mostra nella scheda del vino. Solo quelle scritte nelle fonti trovate, mai inventate.', 'Per i vini già in cantina: Modifica i dati del vino → "Aggiorna dal web" rifà solo la ricerca, senza rileggere l\'etichetta.'] },
   { v: '0.9.5', notes: ['Tocca fuori da una finestra per chiuderla. La scheda del vino salva le modifiche come con "Salva"; Raggruppa le foto chiede prima conferma.'] },
   { v: '0.9.4', notes: ['I filtri non restano più salvati: ogni volta che riapri l\'app la cantina si vede intera.'] },
@@ -1717,11 +1718,32 @@ function toast(msg, onClick) {
 }
 
 // Con più foto (fronte e retro) si vedono affiancate, senza dover scorrere.
+// La prima foto è la principale (lista, diario, ritaglio): con più foto la stellina sceglie quale.
 function renderHero(photos) {
   const hero = $('#wine-photos');
   hero.classList.toggle('two', photos.length === 2);
   hero.classList.toggle('many', photos.length > 2);
-  hero.innerHTML = photos.map((p) => imgTag(p, heroBlob, 'dialog')).join('');
+  hero.innerHTML = photos.length < 2
+    ? photos.map((p) => imgTag(p, heroBlob, 'dialog')).join('')
+    : photos.map((p, i) => `<div class="hp">${imgTag(p, heroBlob, 'dialog')}${i === 0
+      ? '<span class="hp-main on">★ Principale</span>'
+      : p.lost ? '' : `<button type="button" class="hp-main" data-main="${esc(p.id)}" aria-label="Usa come foto principale">☆</button>`}</div>`).join('');
+}
+
+// Sposta la foto scelta in cima: la sincronizzazione porta l'ordine nuovo sugli altri dispositivi.
+async function setMainPhoto(id, photoId) {
+  const w = await updateWine(id, (cur) => {
+    const p = cur.photos.find((x) => x.id === photoId);
+    return p ? { ...cur, photos: [p, ...cur.photos.filter((x) => x !== p)] } : cur;
+  });
+  if (!w) return;
+  if ($('#dlg-wine').open && editingId === id) {
+    releaseUrls('dialog');
+    renderHero(w.photos);
+  }
+  toast(w.photos[0].cropBytes || !settings.geminiKey
+    ? 'Foto principale cambiata.'
+    : 'Foto principale cambiata. "Ritaglia sulla bottiglia" la ritaglia anche nelle anteprime.');
 }
 
 function showReleaseNotes() {
@@ -2797,6 +2819,8 @@ function bindViewer() {
   $('#viewer-prev').addEventListener('click', () => viewerShow(viewer.index - 1));
   $('#viewer-next').addEventListener('click', () => viewerShow(viewer.index + 1));
   $('#wine-photos').addEventListener('click', (e) => {
+    const main = e.target.closest('[data-main]');
+    if (main) return setMainPhoto(editingId, main.dataset.main);
     const img = e.target.closest('img');
     if (!img) return;
     const imgs = [...$('#wine-photos').querySelectorAll('img')];
