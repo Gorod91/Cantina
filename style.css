@@ -259,9 +259,10 @@ dialog label input, dialog label textarea, dialog label select { margin-top: 5px
 dialog label.uncertain input, dialog label.uncertain textarea { background: var(--warn); }
 
 /* Bevuta */
-#dlg-drink .lead { display: flex; gap: 12px; align-items: center; }
-#dlg-drink .lead h2 { font-size: 1.15rem; }
-#drink-thumb img { width: 44px; height: 64px; object-fit: cover; border-radius: 8px; }
+#dlg-drink .wname { margin: 0; }
+#drink-wine { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+#drink-wine[hidden] { display: none; }
+#drink-wine .section-title { font-size: 1.1rem; font-weight: 800; }
 .seg { display: flex; background: var(--sunk); border-radius: 11px; padding: 3px; }
 .seg label { flex: 1; text-align: center; padding: 8px 0; border-radius: 9px; color: var(--muted); font-size: 0.9rem; cursor: pointer; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
