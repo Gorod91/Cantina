@@ -1,10 +1,11 @@
 'use strict';
 
-const APP_VERSION = '0.11.0';
+const APP_VERSION = '0.11.1';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
-  { v: '0.11.0', notes: ['Zoom della cantina: pizzica la lista con due dita per ingrandire o rimpicciolire le foto e le righe dei vini. Il livello resta salvato su questo dispositivo finché non lo cambi di nuovo. Su PC: pizzico sul trackpad o Ctrl + rotellina sulla lista.'] },
+  { v: '0.11.1', notes: ['Zoom della cantina: ingrandendo la lista crescono solo foto e righe, il testo resta della sua grandezza.'] },
+  { v: '0.11.0', notes: ['Zoom della cantina: pizzica la lista con due dita per ingrandire o rimpicciolire le foto e le righe dei vini (il testo resta della stessa grandezza). Il livello resta salvato su questo dispositivo finché non lo cambi di nuovo. Su PC: pizzico sul trackpad o Ctrl + rotellina sulla lista.'] },
   { v: '0.10.4', notes: ['Bevuta aperta dal diario: in alto ci sono Chiudi e Salva sempre a portata di dito, e la finestra scorre solo in verticale, senza spostarsi di lato.'] },
   { v: '0.10.3', notes: ['Guide e premi: non spariscono più se chiudi la scheda del vino mentre la ricerca sul web è ancora in corso, e compaiono da sole nella scheda aperta appena la ricerca finisce.', '"Aggiorna dal web" funziona anche sui vini le cui foto non sono ancora scaricate da Drive.', 'Nei dati del vino le guide si scrivono una per riga.'] },
   { v: '0.10.2', notes: ['Diario: aprendo una bottiglia bevuta ora vedi tutta la scheda del vino (foto, quando berlo, il vino, in tavola, guide e premi, le tue note, acquisto e altre bevute), sotto ai dati della bevuta. "Apri la scheda del vino" porta alla scheda in cantina.'] },
