@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.10.0';
+const APP_VERSION = '0.10.1';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.10.1', notes: ['Guide e premi: non spariscono più se chiudi la scheda del vino mentre la ricerca sul web è ancora in corso, e compaiono da sole nella scheda aperta appena la ricerca finisce.', '"Aggiorna dal web" funziona anche sui vini le cui foto non sono ancora scaricate da Drive.', 'Nei dati del vino le guide si scrivono una per riga.'] },
   { v: '0.10.0', notes: ['Guide e premi: la ricerca sul web cerca anche le valutazioni di Vitae AIS, Gambero Rosso, Bibenda, Veronelli, Doctor Wine, Wine Spectator, James Suckling e altri, e le mostra nella scheda del vino. Solo quelle scritte nelle fonti trovate, mai inventate.', 'Per i vini già in cantina: Modifica i dati del vino → "Aggiorna dal web" rifà solo la ricerca, senza rileggere l\'etichetta.'] },
   { v: '0.9.5', notes: ['Tocca fuori da una finestra per chiuderla. La scheda del vino salva le modifiche come con "Salva"; Raggruppa le foto chiede prima conferma.'] },
   { v: '0.9.4', notes: ['I filtri non restano più salvati: ogni volta che riapri l\'app la cantina si vede intera.'] },
@@ -989,7 +990,7 @@ const FIELDS = [
   { k: 'prezzo', l: 'Prezzo stimato a bottiglia (€)', type: 'NUMBER' },
   { k: 'abbinamenti', l: 'Abbinamenti' },
   { k: 'descrizione', l: 'Descrizione' },
-  { k: 'riconoscimenti', l: 'Guide e premi (uno per voce, separati da virgola)', type: 'ARRAY' },
+  { k: 'riconoscimenti', l: 'Guide e premi (uno per riga)', type: 'ARRAY', lines: true },
 ];
 
 const OPTIONS = Object.fromEntries(FIELDS.filter((f) => f.options).map((f) => [f.k, f.options]));
@@ -1468,7 +1469,8 @@ async function processWine(id) {
     const wine = await getWine(id);
     await Promise.all([
       uploadPhotos(id),
-      wine.status === 'ok' || !wine.photos.some(hasBytes) ? null : recognize(id),
+      // La sola ricerca sul web (stato "details") non ha bisogno delle foto: parte anche se non sono ancora scaricate da Drive.
+      wine.status === 'ok' || (wine.status !== 'details' && !wine.photos.some(hasBytes)) ? null : recognize(id),
     ]);
   } finally {
     running.delete(id);
@@ -1910,7 +1912,10 @@ async function render() {
   // Il registro della scheda aperta si aggiorna mentre il riconoscimento procede.
   if (editingId && $('#dlg-wine').open) {
     const open = wines.find((x) => x.id === editingId);
-    if (open) renderLog(open);
+    if (open) {
+      renderLog(open);
+      refreshOpenWine(open);
+    }
   }
   const q = $('#search').value.trim().toLowerCase();
   const matching = q
@@ -2423,6 +2428,8 @@ function renderLog(w, note = '') {
 // Scheda in sola lettura, a blocchi: in cantina, quando berlo, il vino, in tavola. I campi da modificare stanno in fondo.
 const kvRows = (rows) => rows.filter((r) => r[1]).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
 const joinList = (v) => (Array.isArray(v) ? v.join(', ') : v) || '';
+// Testo di un campo come compare nel modulo: le guide stanno una per riga, perché una voce può contenere virgole.
+const fieldText = (f, v) => (f.lines && Array.isArray(v) ? v.join('\n') : joinList(v));
 
 function renderWineHead(w) {
   const d = w.data || {};
@@ -2581,11 +2588,13 @@ async function openWine(id) {
     if (k === 'acquisto_luogo') return `<label class="span2">Comprato da (negozio, cantina, regalo…)<input name="acquisto_luogo" value="${esc(w.acquisto_luogo || '')}" list="opt-shops" autocomplete="off"><datalist id="opt-shops">${
       [...new Set(lastWines.map((x) => x.acquisto_luogo).filter(Boolean))].map((x) => `<option value="${esc(x)}">`).join('')}</datalist></label>`;
     const f = byKey[k];
-    return input(f.k, f.l, joinList(d[f.k]), f.type === 'INTEGER' ? 'numeric' : f.type === 'NUMBER' ? 'decimal' : '');
+    return input(f.k, f.l, fieldText(f, d[f.k]), f.type === 'INTEGER' ? 'numeric' : f.type === 'NUMBER' ? 'decimal' : '');
   };
   $('#wine-fields').innerHTML = FIELD_GROUPS.map(([title, keys]) =>
     `<fieldset><legend>${esc(title)}</legend>${keys.map(field).join('')}</fieldset>`).join('');
   renderLog(w, apiCost.join(''));
+  snapshotForm();
+  shownData = { id: w.id, key: JSON.stringify(w.data || {}) };
   // I dati da modificare stanno in fondo, chiusi; si aprono da soli solo se il vino non è stato riconosciuto.
   $('#wine-edit').open = w.status !== 'ok' || !!w.error;
   $('#wine-check').hidden = !w.uncertain?.length || $('#wine-edit').open;
@@ -2606,18 +2615,49 @@ async function openWine(id) {
   $('#dlg-wine').querySelectorAll('textarea').forEach(autosize);
 }
 
+// Valori dei campi come erano quando la scheda è stata aperta (o aggiornata da un riconoscimento finito).
+// Si salvano solo i campi cambiati a mano: così un riconoscimento o una ricerca sul web finiti
+// mentre la scheda era aperta non vengono cancellati chiudendola.
+let formBase = {};
+function snapshotForm() {
+  const fd = new FormData($('#wine-form'));
+  formBase = Object.fromEntries(FIELDS.map((f) => [f.k, String(fd.get(f.k) ?? '').trim()]));
+}
+
+// Un riconoscimento o una ricerca sul web finiti con la scheda aperta: si aggiornano i riquadri
+// e i campi che non sono stati toccati, senza perdere quello che si sta scrivendo.
+let shownData = null;
+function refreshOpenWine(w) {
+  const key = JSON.stringify(w.data || {});
+  if (shownData && shownData.id === w.id && shownData.key === key) return;
+  const first = !shownData || shownData.id !== w.id;
+  shownData = { id: w.id, key };
+  if (first) return;
+  renderWineHead(w);
+  const form = $('#wine-form').elements;
+  const d = w.data || {};
+  for (const f of FIELDS) {
+    const el = form[f.k];
+    if (!el || !(f.k in formBase) || String(el.value).trim() !== formBase[f.k]) continue;
+    el.value = fieldText(f, d[f.k]);
+    formBase[f.k] = String(el.value).trim();
+    if (el.tagName === 'TEXTAREA') autosize(el);
+  }
+}
+
 function readForm(w, fd = new FormData($('#wine-form'))) {
   const data = { ...(w.data || {}) };
   const edited = new Set(w.edited || []);
   for (const f of FIELDS) {
     const raw = String(fd.get(f.k) ?? '').trim();
+    if (f.k in formBase && raw === formBase[f.k]) continue;
     let v = raw === '' ? null : raw;
-    if (v != null && f.type === 'ARRAY') v = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    if (v != null && f.type === 'ARRAY') v = raw.split(f.lines ? /\n/ : ',').map((s) => s.trim()).filter(Boolean);
     if (v != null && (f.type === 'INTEGER' || f.type === 'NUMBER')) {
       const n = Number(raw.replace(',', '.'));
       v = Number.isFinite(n) ? n : null;
     }
-    const before = Array.isArray(data[f.k]) ? data[f.k].join(', ') : String(data[f.k] ?? '');
+    const before = fieldText(f, data[f.k]) || String(data[f.k] ?? '');
     if (raw !== before) edited.add(f.k);
     data[f.k] = v;
   }
