@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.10.3';
+const APP_VERSION = '0.11.0';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.11.0', notes: ['Zoom della cantina: pizzica la lista con due dita per ingrandire o rimpicciolire le foto e le righe dei vini. Il livello resta salvato su questo dispositivo finché non lo cambi di nuovo. Su PC: pizzico sul trackpad o Ctrl + rotellina sulla lista.'] },
   { v: '0.10.3', notes: ['Guide e premi: non spariscono più se chiudi la scheda del vino mentre la ricerca sul web è ancora in corso, e compaiono da sole nella scheda aperta appena la ricerca finisce.', '"Aggiorna dal web" funziona anche sui vini le cui foto non sono ancora scaricate da Drive.', 'Nei dati del vino le guide si scrivono una per riga.'] },
   { v: '0.10.2', notes: ['Diario: aprendo una bottiglia bevuta ora vedi tutta la scheda del vino (foto, quando berlo, il vino, in tavola, guide e premi, le tue note, acquisto e altre bevute), sotto ai dati della bevuta. "Apri la scheda del vino" porta alla scheda in cantina.'] },
   { v: '0.10.1', notes: ['Foto principale: se un vino ha più foto, nella scheda tocca la stellina ☆ su una foto per renderla la principale. È quella che si vede nella lista, nel diario e in cima alla scheda, e passa agli altri dispositivi con la sincronizzazione.'] },
@@ -2075,6 +2076,15 @@ function bindSwipe() {
   });
   list.addEventListener('pointermove', (e) => {
     if (!row) return;
+    // Il secondo dito trasforma il gesto in uno zoom: lo swipe si annulla.
+    if (listPinching) {
+      row.style.transform = '';
+      row.parentElement.classList.remove('armed');
+      row = null;
+      swiping = false;
+      moved = true;
+      return;
+    }
     const mx = e.clientX - x0;
     const my = e.clientY - y0;
     if (!locked && Math.hypot(mx, my) > 8) {
@@ -2109,6 +2119,91 @@ function bindSwipe() {
     if (selection.on) toggleSelected(li);
     else openWine(li.dataset.id);
   });
+}
+
+// ---------- Zoom della lista (due dita) ----------
+
+// Pizzicando la lista con due dita foto e righe dei vini diventano più grandi o più piccole.
+// Il livello resta salvato su questo dispositivo finché non lo si cambia di nuovo.
+const LIST_ZOOM_MIN = 0.7;
+const LIST_ZOOM_MAX = 3;
+let listZoom = 1;
+let listPinching = false;
+
+function setListZoom(z, save) {
+  listZoom = Math.min(LIST_ZOOM_MAX, Math.max(LIST_ZOOM_MIN, Math.round(z * 100) / 100));
+  const list = $('#wine-list');
+  document.documentElement.style.setProperty('--lz', listZoom);
+  list.classList.toggle('zoom-big', listZoom >= 1.6);
+  if (save) try { localStorage.setItem('cantina.listZoom', String(listZoom)); } catch { /* solo per questa volta */ }
+}
+
+function bindListZoom() {
+  const list = $('#wine-list');
+  let saved = 1;
+  try { saved = Number(localStorage.getItem('cantina.listZoom')) || 1; } catch { /* resta 1 */ }
+  setListZoom(saved, false);
+
+  // Mentre si zooma resta fermo il vino sotto le dita.
+  let anchor = null;
+  const pickAnchor = (y) => {
+    const li = document.elementFromPoint(window.innerWidth / 2, y)?.closest('#wine-list li') || list.querySelector('li');
+    anchor = li ? { li, y, off: (y - li.getBoundingClientRect().top) / (li.offsetHeight || 1) } : null;
+  };
+  const zoomTo = (z) => {
+    setListZoom(z, false);
+    if (anchor?.li.isConnected) {
+      const r = anchor.li.getBoundingClientRect();
+      window.scrollBy(0, r.top + anchor.off * anchor.li.offsetHeight - anchor.y);
+    }
+  };
+  const finish = () => {
+    listPinching = false;
+    anchor = null;
+    setListZoom(listZoom, true);
+  };
+
+  // iPhone e Android: due dita sulla lista.
+  let d0 = 0;
+  let z0 = 1;
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  list.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 2) return;
+    listPinching = true;
+    d0 = dist(e.touches) || 1;
+    z0 = listZoom;
+    pickAnchor((e.touches[0].clientY + e.touches[1].clientY) / 2);
+  }, { passive: true });
+  list.addEventListener('touchmove', (e) => {
+    if (!listPinching || e.touches.length < 2) return;
+    e.preventDefault();
+    zoomTo(z0 * dist(e.touches) / d0);
+  }, { passive: false });
+  const touchEnd = (e) => { if (listPinching && e.touches.length < 2) finish(); };
+  list.addEventListener('touchend', touchEnd);
+  list.addEventListener('touchcancel', touchEnd);
+
+  // Safari su Mac: pizzico sul trackpad (su iPhone ci pensano già gli eventi touch).
+  if (!navigator.maxTouchPoints) {
+    let gz = 1;
+    list.addEventListener('gesturestart', (e) => {
+      gz = listZoom;
+      pickAnchor(e.clientY || window.innerHeight / 2);
+    });
+    list.addEventListener('gesturechange', (e) => zoomTo(gz * e.scale));
+    list.addEventListener('gestureend', finish);
+  }
+
+  // Chrome ed Edge su PC: pizzico sul trackpad o Ctrl + rotellina.
+  let wheelTimer = 0;
+  list.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    if (!wheelTimer) pickAnchor(e.clientY);
+    zoomTo(listZoom * Math.exp(-e.deltaY / 200));
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => { wheelTimer = 0; finish(); }, 300);
+  }, { passive: false });
 }
 
 // ---------- PC ----------
@@ -2989,6 +3084,7 @@ function bindUi() {
   });
   $('#btn-finished').addEventListener('click', () => { showFinished = !showFinished; scheduleRender(); });
   bindSwipe();
+  bindListZoom();
   bindDrinkSheet();
   $('#btn-drink-home').addEventListener('click', () => openDrink({ dove: 'casa', fromCellar: false }));
   $('#btn-drink-out').addEventListener('click', () => openDrink({ dove: 'fuori', fromCellar: false }));
