@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.11.2';
+const APP_VERSION = '0.11.3';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.11.3', notes: ['Cantina: nomi, produttori e note non vengono più tagliati con "…", vanno a capo e si leggono interi. Con lo zoom grande compaiono anche zona, vitigni e gradazione accanto alla foto.'] },
   { v: '0.11.2', notes: ['Zoom della cantina più stabile: mentre pizzichi la pagina non scorre più insieme alle dita e il vino che hai sotto le dita resta fermo.'] },
   { v: '0.11.1', notes: ['Zoom della cantina: ingrandendo la lista crescono solo foto e righe, il testo resta della sua grandezza.'] },
   { v: '0.11.0', notes: ['Zoom della cantina: pizzica la lista con due dita per ingrandire o rimpicciolire le foto e le righe dei vini (il testo resta della stessa grandezza). Il livello resta salvato su questo dispositivo finché non lo cambi di nuovo. Su PC: pizzico sul trackpad o Ctrl + rotellina sulla lista.'] },
@@ -1792,6 +1793,13 @@ function listSubtitle(w) {
     .filter(Boolean).join(' · ');
 }
 
+// Righe in più che compaiono quando la lista è ingrandita e c'è spazio accanto alla foto.
+function listMore(w) {
+  const d = w.data || {};
+  return [[d.regione, d.nazione].filter(Boolean).join(', '), joinList(d.vitigni), d.gradazione && `${d.gradazione}%`.replace('%%', '%')]
+    .filter(Boolean).join(' · ');
+}
+
 // Colore come simbolo: calice pieno del colore del vino; per le bollicine un calice a tulipano con le bollicine.
 const COLOR_NAMES = { rosso: 'Rosso', bianco: 'Bianco', rosato: 'Rosato', orange: 'Orange' };
 const isBubbly = (d) => /spumante|frizzante|rifermentato/.test(d?.stile || '');
@@ -1978,6 +1986,7 @@ async function render() {
         <div class="meta">
           <strong>${colorIcon(w.data)}${esc(listTitle(w))}</strong>
           <small>${esc(listSubtitle(w))}</small>
+          ${listMore(w) ? `<small class="more">${esc(listMore(w))}</small>` : ''}
           ${w.nota ? `<small class="note">${esc(w.nota)}</small>` : ''}
           ${[...wineBadges(w), twin && 'Doppione? Apri per unire'].filter(Boolean).map((b) => `<span class="badge">${esc(b)}</span>`).join('')}
         </div>
@@ -2138,7 +2147,7 @@ function setListZoom(z, save) {
   // La variabile sta solo sulla vista Cantina: cambiarla non ricalcola tutta la pagina a ogni movimento.
   $('#view-cellar').style.setProperty('--lz', listZoom);
   // Il testo che va a capo cambia l'altezza delle righe a scatti: si decide solo a gesto finito.
-  if (save || !listPinching) $('#wine-list').classList.toggle('zoom-big', listZoom >= 1.6);
+  if (save || !listPinching) $('#wine-list').classList.toggle('zoom-big', listZoom >= 1.4);
   if (save) try { localStorage.setItem('cantina.listZoom', String(listZoom)); } catch { /* solo per questa volta */ }
 }
 
