@@ -136,6 +136,12 @@ input[type=checkbox], input[type=radio] { width: auto; }
   background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
 }
 #wine-list li { position: relative; overflow: hidden; }
+/* Zoom a due dita: --lz ingrandisce foto e righe, il testo resta della sua grandezza. */
+:root { --lz: 1; }
+/* Durante il pizzico niente scorrimento né animazioni che facciano tremare la lista. */
+html.pinching, html.pinching body { overscroll-behavior: none; }
+html.pinching #wine-list * { transition: none !important; }
+#wine-list { --lzt: calc(1 + (var(--lz) - 1) * 0.3); font-size: 1rem; }
 #wine-list li + li, .entries li + li { border-top: 1px solid var(--line); }
 #wine-list li.empty { padding: 16px; color: var(--muted); }
 #wine-list li.finished { opacity: 0.5; }
@@ -151,7 +157,7 @@ input[type=checkbox], input[type=radio] { width: auto; }
 #wine-list .row {
   position: relative;
   display: flex; align-items: center; gap: 12px;
-  padding: 10px 12px;
+  padding: calc(10px * var(--lzt)) 12px;
   background: var(--card);
   cursor: pointer;
   touch-action: pan-y;
@@ -159,7 +165,7 @@ input[type=checkbox], input[type=radio] { width: auto; }
 }
 #wine-list .row.anim { transition: transform 0.22s ease; }
 #wine-list img, #wine-list .lost, #wine-list .dot {
-  width: 38px; height: 56px; flex: none; border-radius: 8px; object-fit: cover;
+  width: calc(38px * var(--lz)); height: calc(56px * var(--lz)); flex: none; border-radius: calc(8px * var(--lzt)); object-fit: cover;
   background: var(--sunk); -webkit-user-drag: none;
 }
 
@@ -455,6 +461,14 @@ dialog.scrolled .bar-title { opacity: 1; }
 .notes-box { margin: 0; cursor: text; }
 .notes-box textarea { background: var(--card); resize: none; overflow: hidden; min-height: 52px; field-sizing: content; line-height: 1.45; }
 #wine-list .meta .note { color: var(--wine-text); font-style: italic; }
+#wine-list .meta strong { font-size: 1em; }
+#wine-list .meta small { font-size: 0.8em; }
+#wine-list .qty { font-size: 0.95em; }
+#wine-list .pill { font-size: 0.68em; }
+#wine-list .badge { font-size: 0.7em; }
+#wine-list .row-under { font-size: 0.9em; }
+/* Con le righe grandi il testo va a capo invece di essere tagliato. */
+#wine-list.zoom-big .meta strong, #wine-list.zoom-big .meta small { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 
 /* Raggruppa le foto */
 #group-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -572,20 +586,20 @@ body.dropping #drop-hint {
   #btn-settings { margin-top: auto; }
 
   /* Lista a colonne */
-  #list-head, #wine-list .row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 56px 170px 80px 44px; gap: 12px; align-items: center; }
+  #list-head, #wine-list .row { display: grid; grid-template-columns: calc(44px * var(--lz, 1)) minmax(0, 1fr) 56px 170px 80px 44px; gap: 12px; align-items: center; }
   #list-head { padding: 0 12px; }
   #list-head button { background: none; padding: 4px 0; text-align: left; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
   #list-head button.on { color: var(--wine-text); }
   #list-head .num, #wine-list .dc.num { text-align: right; }
   #list-head > span { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
   body:has(#dlg-wine[open]:not(:modal)) #wine-list .dc small { display: none; }
-  body:has(#dlg-wine[open]:not(:modal)) #list-head, body:has(#dlg-wine[open]:not(:modal)) #wine-list .row { grid-template-columns: 44px minmax(0, 1fr) 50px 110px 76px 40px; }
+  body:has(#dlg-wine[open]:not(:modal)) #list-head, body:has(#dlg-wine[open]:not(:modal)) #wine-list .row { grid-template-columns: calc(44px * var(--lz, 1)) minmax(0, 1fr) 50px 110px 76px 40px; }
   #wine-list .row .right { display: none; }
-  #wine-list .dc { display: block; font-variant-numeric: tabular-nums; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #wine-list .dc small { color: var(--muted); margin-left: 6px; font-size: 0.78rem; }
+  #wine-list .dc { display: block; font-variant-numeric: tabular-nums; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #wine-list .dc small { color: var(--muted); margin-left: 6px; font-size: 0.78em; }
   #wine-list .row:hover { background: var(--sunk); }
   #wine-list li.cur .row { background: var(--wine-soft); }
-  body.selecting #wine-list .row { grid-template-columns: 22px 44px minmax(0, 1fr) 56px 170px 80px 44px; }
+  body.selecting #wine-list .row { grid-template-columns: 22px calc(44px * var(--lz, 1)) minmax(0, 1fr) 56px 170px 80px 44px; }
 
   /* Scheda del vino fissa a destra */
   #dlg-wine:not(:modal) {

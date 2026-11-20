@@ -1,10 +1,13 @@
 'use strict';
 
-const APP_VERSION = '0.11.0';
+const APP_VERSION = '0.12.0';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
-  { v: '0.11.0', notes: ['Su telefono le schede non salgono più dal basso: sono pagine che entrano da destra, come le Impostazioni di iOS, con ‹ Indietro in alto a sinistra e il titolo che compare scorrendo.', 'Per tornare indietro strisci da sinistra verso destra in qualunque punto della pagina; la pagina segue il dito.', 'Indietro (pulsante o strisciata) salva, come in iOS: scheda del vino, bevuta e impostazioni non perdono le modifiche. Raggruppa le foto invece annulla, dopo averlo chiesto.', 'Segna bevuta dalla scheda del vino apre la bevuta come pagina successiva.'] },
+  { v: '0.12.0', notes: ['Su telefono le schede non salgono più dal basso: sono pagine che entrano da destra, come le Impostazioni di iOS, con ‹ Indietro in alto a sinistra e il titolo che compare scorrendo.', 'Per tornare indietro strisci da sinistra verso destra in qualunque punto della pagina; la pagina segue il dito.', 'Indietro (pulsante o strisciata) salva, come in iOS: scheda del vino, bevuta e impostazioni non perdono le modifiche. Raggruppa le foto invece annulla, dopo averlo chiesto.', 'Segna bevuta dalla scheda del vino apre la bevuta come pagina successiva.'] },
+  { v: '0.11.2', notes: ['Zoom della cantina più stabile: mentre pizzichi la pagina non scorre più insieme alle dita e il vino che hai sotto le dita resta fermo.'] },
+  { v: '0.11.1', notes: ['Zoom della cantina: ingrandendo la lista crescono solo foto e righe, il testo resta della sua grandezza.'] },
+  { v: '0.11.0', notes: ['Zoom della cantina: pizzica la lista con due dita per ingrandire o rimpicciolire le foto e le righe dei vini (il testo resta della stessa grandezza). Il livello resta salvato su questo dispositivo finché non lo cambi di nuovo. Su PC: pizzico sul trackpad o Ctrl + rotellina sulla lista.'] },
   { v: '0.10.4', notes: ['Bevuta aperta dal diario: in alto ci sono Chiudi e Salva sempre a portata di dito, e la finestra scorre solo in verticale, senza spostarsi di lato.'] },
   { v: '0.10.3', notes: ['Guide e premi: non spariscono più se chiudi la scheda del vino mentre la ricerca sul web è ancora in corso, e compaiono da sole nella scheda aperta appena la ricerca finisce.', '"Aggiorna dal web" funziona anche sui vini le cui foto non sono ancora scaricate da Drive.', 'Nei dati del vino le guide si scrivono una per riga.'] },
   { v: '0.10.2', notes: ['Diario: aprendo una bottiglia bevuta ora vedi tutta la scheda del vino (foto, quando berlo, il vino, in tavola, guide e premi, le tue note, acquisto e altre bevute), sotto ai dati della bevuta. "Apri la scheda del vino" porta alla scheda in cantina.'] },
@@ -2077,6 +2080,15 @@ function bindSwipe() {
   });
   list.addEventListener('pointermove', (e) => {
     if (!row) return;
+    // Il secondo dito trasforma il gesto in uno zoom: lo swipe si annulla.
+    if (listPinching) {
+      row.style.transform = '';
+      row.parentElement.classList.remove('armed');
+      row = null;
+      swiping = false;
+      moved = true;
+      return;
+    }
     const mx = e.clientX - x0;
     const my = e.clientY - y0;
     if (!locked && Math.hypot(mx, my) > 8) {
@@ -2111,6 +2123,117 @@ function bindSwipe() {
     if (selection.on) toggleSelected(li);
     else openWine(li.dataset.id);
   });
+}
+
+// ---------- Zoom della lista (due dita) ----------
+
+// Pizzicando la lista con due dita foto e righe dei vini diventano più grandi o più piccole.
+// Il livello resta salvato su questo dispositivo finché non lo si cambia di nuovo.
+const LIST_ZOOM_MIN = 0.7;
+const LIST_ZOOM_MAX = 3;
+let listZoom = 1;
+let listPinching = false;
+
+function setListZoom(z, save) {
+  listZoom = Math.min(LIST_ZOOM_MAX, Math.max(LIST_ZOOM_MIN, Math.round(z * 100) / 100));
+  // La variabile sta solo sulla vista Cantina: cambiarla non ricalcola tutta la pagina a ogni movimento.
+  $('#view-cellar').style.setProperty('--lz', listZoom);
+  // Il testo che va a capo cambia l'altezza delle righe a scatti: si decide solo a gesto finito.
+  if (save || !listPinching) $('#wine-list').classList.toggle('zoom-big', listZoom >= 1.6);
+  if (save) try { localStorage.setItem('cantina.listZoom', String(listZoom)); } catch { /* solo per questa volta */ }
+}
+
+function bindListZoom() {
+  const list = $('#wine-list');
+  let saved = 1;
+  try { saved = Number(localStorage.getItem('cantina.listZoom')) || 1; } catch { /* resta 1 */ }
+  setListZoom(saved, false);
+
+  // Mentre si zooma il vino sotto le dita resta sotto le dita.
+  let anchor = null;
+  const pickAnchor = (y) => {
+    const li = document.elementFromPoint(window.innerWidth / 2, y)?.closest('#wine-list li') || list.querySelector('li');
+    anchor = li ? { li, y, off: (y - li.getBoundingClientRect().top) / (li.offsetHeight || 1) } : null;
+  };
+  const keepAnchor = () => {
+    if (!anchor?.li.isConnected) return;
+    const r = anchor.li.getBoundingClientRect();
+    const dy = Math.round(r.top + anchor.off * anchor.li.offsetHeight - anchor.y);
+    if (dy) window.scrollTo(0, window.scrollY + dy);
+  };
+  // Un solo aggiornamento per fotogramma, qualunque sia il numero di eventi del dito.
+  let want = null;
+  let frame = 0;
+  const zoomTo = (z) => {
+    want = z;
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      if (want == null) return;
+      const before = listZoom;
+      setListZoom(want, false);
+      want = null;
+      if (listZoom !== before) keepAnchor();
+    });
+  };
+  const finish = () => {
+    if (frame) { cancelAnimationFrame(frame); frame = 0; }
+    if (want != null) setListZoom(want, false);
+    want = null;
+    listPinching = false;
+    setListZoom(listZoom, true);
+    keepAnchor();
+    anchor = null;
+    document.documentElement.classList.remove('pinching');
+  };
+
+  // iPhone e Android: due dita sulla lista. La pagina non scorre finché le dita sono due.
+  let d0 = 0;
+  let z0 = 1;
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  list.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 2) return;
+    if (e.cancelable) e.preventDefault();
+    listPinching = true;
+    document.documentElement.classList.add('pinching');
+    d0 = dist(e.touches) || 1;
+    z0 = listZoom;
+    pickAnchor((e.touches[0].clientY + e.touches[1].clientY) / 2);
+  }, { passive: false });
+  list.addEventListener('touchmove', (e) => {
+    if (!listPinching) return;
+    if (e.cancelable) e.preventDefault();
+    if (e.touches.length < 2) return;
+    const ratio = dist(e.touches) / d0;
+    // Piccoli tremolii delle dita non cambiano lo zoom.
+    if (Math.abs(ratio - 1) < 0.03 && listZoom === z0) return;
+    zoomTo(z0 * ratio);
+  }, { passive: false });
+  const touchEnd = (e) => { if (listPinching && e.touches.length < 2) finish(); };
+  list.addEventListener('touchend', touchEnd);
+  list.addEventListener('touchcancel', touchEnd);
+
+  // Safari su Mac: pizzico sul trackpad (su iPhone ci pensano già gli eventi touch).
+  if (!navigator.maxTouchPoints) {
+    let gz = 1;
+    list.addEventListener('gesturestart', (e) => {
+      gz = listZoom;
+      pickAnchor(e.clientY || window.innerHeight / 2);
+    });
+    list.addEventListener('gesturechange', (e) => zoomTo(gz * e.scale));
+    list.addEventListener('gestureend', finish);
+  }
+
+  // Chrome ed Edge su PC: pizzico sul trackpad o Ctrl + rotellina.
+  let wheelTimer = 0;
+  list.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    if (!wheelTimer) pickAnchor(e.clientY);
+    zoomTo((want ?? listZoom) * Math.exp(-e.deltaY / 200));
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => { wheelTimer = 0; finish(); }, 300);
+  }, { passive: false });
 }
 
 // ---------- PC ----------
@@ -3154,6 +3277,7 @@ function bindUi() {
   });
   $('#btn-finished').addEventListener('click', () => { showFinished = !showFinished; scheduleRender(); });
   bindSwipe();
+  bindListZoom();
   bindDrinkSheet();
   $('#btn-drink-home').addEventListener('click', () => openDrink({ dove: 'casa', fromCellar: false }));
   $('#btn-drink-out').addEventListener('click', () => openDrink({ dove: 'fuori', fromCellar: false }));
