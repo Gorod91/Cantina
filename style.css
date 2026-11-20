@@ -468,7 +468,12 @@ dialog.scrolled .bar-title { opacity: 1; }
 #wine-list .badge { font-size: 0.7em; }
 #wine-list .row-under { font-size: 0.9em; }
 /* Con le righe grandi il testo va a capo invece di essere tagliato. */
-#wine-list.zoom-big .meta strong, #wine-list.zoom-big .meta small { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+/* Nella lista il testo non si taglia mai: va a capo e si legge intero. */
+#wine-list .meta strong, #wine-list .meta small, #wine-list .dc { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+#wine-list .meta small + small { margin-top: 2px; }
+/* Con lo zoom grande accanto alla foto c'è spazio per zona, vitigni e gradazione. */
+#wine-list .meta .more { display: none; }
+#wine-list.zoom-big .meta .more { display: block; }
 
 /* Raggruppa le foto */
 #group-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -595,7 +600,7 @@ body.dropping #drop-hint {
   body:has(#dlg-wine[open]:not(:modal)) #wine-list .dc small { display: none; }
   body:has(#dlg-wine[open]:not(:modal)) #list-head, body:has(#dlg-wine[open]:not(:modal)) #wine-list .row { grid-template-columns: calc(44px * var(--lz, 1)) minmax(0, 1fr) 50px 110px 76px 40px; }
   #wine-list .row .right { display: none; }
-  #wine-list .dc { display: block; font-variant-numeric: tabular-nums; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #wine-list .dc { display: block; font-variant-numeric: tabular-nums; font-size: 0.9em; }
   #wine-list .dc small { color: var(--muted); margin-left: 6px; font-size: 0.78em; }
   #wine-list .row:hover { background: var(--sunk); }
   #wine-list li.cur .row { background: var(--wine-soft); }
