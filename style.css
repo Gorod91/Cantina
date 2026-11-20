@@ -163,7 +163,8 @@ html.pinching #wine-list * { transition: none !important; }
   touch-action: pan-y;
   user-select: none; -webkit-user-select: none;
 }
-#wine-list .row.anim { transition: transform 0.22s ease; }
+#wine-list .row { transition: background-color 0.15s; }
+#wine-list .row.anim { transition: transform 0.22s ease, background-color 0.15s; }
 #wine-list img, #wine-list .lost, #wine-list .dot {
   width: calc(38px * var(--lz)); height: calc(56px * var(--lz)); flex: none; border-radius: calc(8px * var(--lzt)); object-fit: cover;
   background: var(--sunk); -webkit-user-drag: none;
@@ -306,7 +307,7 @@ dialog label.uncertain input, dialog label.uncertain textarea { background: var(
 .track .now { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--fg); }
 .ticks { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .stepper { display: flex; align-items: center; gap: 12px; font-weight: 800; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
-.stepper button { width: 34px; height: 34px; padding: 0; border-radius: 50%; background: var(--card); font-size: 1.2rem; line-height: 1; }
+.stepper button { width: 40px; height: 40px; padding: 0; border-radius: 50%; background: var(--card); font-size: 1.2rem; line-height: 1; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 0.9rem; }
 .kv:empty { display: none; }
 .kv dt { color: var(--muted); }
@@ -642,3 +643,27 @@ body.dropping #drop-hint {
 /* Guide e premi */
 .awards { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .awards li { padding: 4px 10px; border-radius: 99px; background: var(--wine-soft); color: var(--wine-text); font-size: 0.85rem; font-weight: 650; }
+
+/* ---------- Feedback al tocco (classe .pressed, vedi bindPressFeedback in app.js) ---------- */
+button, .shutter-btn, .seg label, summary, .gphoto, .hero img, .hero .lost, #vintages li, .entries .row, .tab svg {
+  transition: transform 0.14s ease, opacity 0.14s ease, background-color 0.14s ease, filter 0.14s ease;
+}
+button.pressed { transform: scale(0.96); filter: brightness(1.35); }
+button.primary.pressed, .shutter-btn.pressed { filter: brightness(1.25); }
+.shutter-btn.pressed { transform: scale(0.9); }
+.stepper button.pressed, .hp-main.pressed, .gzoom.pressed, #viewer-close.pressed { transform: scale(0.86); background: var(--line); }
+#viewer-close.pressed { background: rgba(255, 255, 255, 0.35); }
+.viewer-nav.pressed { transform: translateY(-50%) scale(0.88); background: rgba(255, 255, 255, 0.35); filter: none; }
+/* Testi toccabili (link, barra in alto, schede in basso): sbiadiscono come in iOS */
+button.link.pressed, .bar-btn.pressed, .tab.pressed, #list-head button.pressed, .cellar.pressed { transform: none; filter: none; opacity: 0.45; }
+.tab.pressed svg { transform: scale(0.86); }
+.cellar.pressed { opacity: 0.7; background: var(--line); }
+.chip.pressed { transform: scale(0.94); filter: brightness(1.4); }
+#wine-list .row.pressed, .entries .row.pressed { background: #2f2629; }
+#vintages li.pressed { opacity: 0.55; }
+.seg label.pressed { opacity: 0.55; }
+summary.pressed { opacity: 0.5; }
+.gphoto.pressed, .hero img.pressed, .hero .lost.pressed { opacity: 0.75; transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  .pressed { transform: none !important; }
+}

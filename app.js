@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.12.0';
+const APP_VERSION = '0.12.1';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.12.1', notes: ['Ogni tasto ora risponde al tocco: i pulsanti si schiacciano un attimo, i link e le schede in basso sbiadiscono come in iOS, le righe di cantina, diario e annate si illuminano. Se stai solo scorrendo la pagina non lampeggia niente.', 'Più e − delle bottiglie un po\' più grandi, più facili da prendere.', 'Annate: la scritta "oggi" non si sovrappone più agli anni sotto.'] },
   { v: '0.12.0', notes: ['Su telefono le schede non salgono più dal basso: sono pagine che entrano da destra, come le Impostazioni di iOS, con ‹ Indietro in alto a sinistra e il titolo che compare scorrendo.', 'Per tornare indietro strisci da sinistra verso destra in qualunque punto della pagina; la pagina segue il dito.', 'Indietro (pulsante o strisciata) salva, come in iOS: scheda del vino, bevuta e impostazioni non perdono le modifiche. Raggruppa le foto invece annulla, dopo averlo chiesto.', 'Segna bevuta dalla scheda del vino apre la bevuta come pagina successiva.'] },
   { v: '0.11.3', notes: ['Cantina: nomi, produttori e note non vengono più tagliati con "…", vanno a capo e si leggono interi. Con lo zoom grande compaiono anche zona, vitigni e gradazione accanto alla foto.'] },
   { v: '0.11.2', notes: ['Zoom della cantina più stabile: mentre pizzichi la pagina non scorre più insieme alle dita e il vino che hai sotto le dita resta fermo.'] },
@@ -2042,7 +2043,7 @@ function renderVintages(wines) {
   const pos = (y) => `${((y - lo) / (hi - lo) * 100).toFixed(2)}%`;
   const step = hi - lo > 24 ? 10 : 5;
   const ticks = [];
-  for (let y = Math.ceil(lo / step) * step; y <= hi; y += step) if (Math.abs(y - now) > 1.6) ticks.push(y);
+  for (let y = Math.ceil(lo / step) * step; y <= hi; y += step) if (Math.abs(y - now) / (hi - lo) > 0.09) ticks.push(y); // niente anni sotto la scritta "oggi"
   const soon = rows.filter((r) => r.state.k === 'soon').length;
   const over = rows.filter((r) => r.state.k === 'over').length;
   $('#vintage-summary').textContent = [`${rows.length} vini`, soon && `${soon} da bere presto`, over && `${over} oltre il momento migliore`, missing && `${missing} senza date`].filter(Boolean).join(' · ');
@@ -2063,6 +2064,46 @@ function showView(view) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.dataset.view === view));
   $('#view-title').textContent = view === 'cellar' && currentCellar ? currentCellar.name : VIEW_TITLES[view];
   window.scrollTo(0, 0);
+}
+
+// ---------- Feedback al tocco ----------
+// Ogni cosa toccabile si "preme" (classe .pressed): subito se il dito resta fermo,
+// per un attimo anche con un tocco rapido; niente lampeggi se il dito scorre la pagina.
+const PRESSABLE = 'button, .shutter-btn, .seg label, summary, #wine-list .row, .entries .row, #vintages li, .gphoto, .hero img, .hero .lost';
+function bindPressFeedback() {
+  let el = null;
+  let timer = 0;
+  let x0 = 0;
+  let y0 = 0;
+  const cancel = () => {
+    clearTimeout(timer);
+    if (el) el.classList.remove('pressed');
+    el = null;
+  };
+  document.addEventListener('pointerdown', (e) => {
+    cancel();
+    if (e.button > 0) return;
+    const t = e.target.closest(PRESSABLE);
+    if (!t || t.disabled) return;
+    el = t;
+    x0 = e.clientX;
+    y0 = e.clientY;
+    // Le righe delle liste aspettano un istante: se il dito scorre, non si accendono.
+    timer = setTimeout(() => el?.classList.add('pressed'), t.matches('button, .shutter-btn, .seg label, summary') ? 0 : 70);
+  }, true);
+  document.addEventListener('pointermove', (e) => {
+    if (el && Math.hypot(e.clientX - x0, e.clientY - y0) > 10) cancel();
+  }, true);
+  document.addEventListener('pointerup', () => {
+    if (!el) return;
+    clearTimeout(timer);
+    const t = el;
+    el = null;
+    t.classList.add('pressed');
+    setTimeout(() => t.classList.remove('pressed'), 140);
+  }, true);
+  document.addEventListener('pointercancel', cancel, true);
+  window.addEventListener('scroll', cancel, { passive: true, capture: true });
 }
 
 // ---------- Swipe = bevuta ----------
@@ -3286,6 +3327,7 @@ function bindUi() {
   });
   $('#btn-finished').addEventListener('click', () => { showFinished = !showFinished; scheduleRender(); });
   bindSwipe();
+  bindPressFeedback();
   bindListZoom();
   bindDrinkSheet();
   $('#btn-drink-home').addEventListener('click', () => openDrink({ dove: 'casa', fromCellar: false }));
