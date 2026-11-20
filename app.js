@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.10.0';
+const APP_VERSION = '0.10.1';
 
 // Note di rilascio mostrate nell'app (tocca la versione in fondo alla pagina). Aggiungere in cima a ogni rilascio.
 const RELEASE_NOTES = [
+  { v: '0.10.1', notes: ['Diario: aprendo una bottiglia bevuta ora vedi tutta la scheda del vino (foto, quando berlo, il vino, in tavola, guide e premi, le tue note, acquisto e altre bevute), sotto ai dati della bevuta. "Apri la scheda del vino" porta alla scheda in cantina.'] },
   { v: '0.10.0', notes: ['Guide e premi: la ricerca sul web cerca anche le valutazioni di Vitae AIS, Gambero Rosso, Bibenda, Veronelli, Doctor Wine, Wine Spectator, James Suckling e altri, e le mostra nella scheda del vino. Solo quelle scritte nelle fonti trovate, mai inventate.', 'Per i vini già in cantina: Modifica i dati del vino → "Aggiorna dal web" rifà solo la ricerca, senza rileggere l\'etichetta.'] },
   { v: '0.9.5', notes: ['Tocca fuori da una finestra per chiuderla. La scheda del vino salva le modifiche come con "Salva"; Raggruppa le foto chiede prima conferma.'] },
   { v: '0.9.4', notes: ['I filtri non restano più salvati: ogni volta che riapri l\'app la cantina si vede intera.'] },
@@ -2267,12 +2268,17 @@ async function openDrink(drink, { fresh = false } = {}) {
   const form = $('#drink-form');
   const wine = drink.wineId ? await getWine(drink.wineId) : null;
   releaseUrls('drink');
-  $('#drink-thumb').innerHTML = wine?.photos?.[0] ? imgTag(wine.photos[0], thumbBlob, 'drink') : '';
-  $('#drink-thumb').hidden = !wine?.photos?.[0];
-  $('#drink-title').textContent = isNew ? 'Nuova bevuta' : drink.nome || 'Bevuta';
+  const photos = wine?.photos || [];
+  const hero = $('#drink-photos');
+  hero.classList.toggle('two', photos.length === 2);
+  hero.classList.toggle('many', photos.length > 2);
+  hero.innerHTML = photos.map((p) => imgTag(p, heroBlob, 'drink')).join('');
+  hero.hidden = !photos.length;
+  await renderDrinkWine(drink, wine);
+  $('#drink-title').textContent = isNew ? 'Nuova bevuta' : wine ? listTitle(wine) : drink.nome || 'Bevuta';
   $('#drink-sub').textContent = fresh
     ? `Segnata ora · ${Number(wine?.quantita) > 0 ? `ne restano ${wine.quantita}` : 'era l\'ultima bottiglia'}`
-    : drink.fromCellar ? 'Dalla cantina' : '';
+    : wine ? wineInfo(wine).sub : drink.fromCellar ? 'Dalla cantina' : '';
   $('#drink-name').hidden = !!drink.wineId;
   form.elements.nome.value = drink.nome || '';
   form.elements.dove.value = drink.dove || 'casa';
@@ -2286,6 +2292,31 @@ async function openDrink(drink, { fresh = false } = {}) {
   syncDrinkForm();
   $('#dlg-drink').returnValue = '';
   $('#dlg-drink').showModal();
+}
+
+// Sotto i dati della bevuta: tutto quello che la scheda del vino in cantina sa di quella bottiglia.
+async function renderDrinkWine(drink, wine) {
+  const box = $('#drink-wine');
+  if (!wine) {
+    box.innerHTML = drink.wineId ? '<p class="hint">Questo vino non è più in cantina: restano solo i dati della bevuta.</p>' : '';
+    box.hidden = !drink.wineId;
+    return;
+  }
+  const info = wineInfo(wine);
+  const others = (await allDrinks()).filter((x) => x.wineId === wine.id && x.id !== drink.id).sort((a, b) => b.data.localeCompare(a.data));
+  const left = Number(wine.quantita) || 0;
+  const blocks = [
+    info.window && `<div class="box window">${info.window}</div>`,
+    info.about && `<div class="box">${info.about}</div>`,
+    info.table && `<div class="box">${info.table}</div>`,
+    info.awards && `<div class="box">${info.awards}</div>`,
+    wine.nota && `<div class="box"><span class="label">Le mie note sul vino</span><p class="text">${esc(wine.nota)}</p></div>`,
+    `<div class="box"><div class="box-row"><span class="label">In cantina</span><b>${left ? `ne restano ${left}` : 'finito'}</b></div>${info.kv ? `<dl class="kv">${info.kv}</dl>` : ''}</div>`,
+    others.length && `<div class="box"><span class="label">Altre bevute di questo vino</span><ul class="history">${others.map((x) => `<li><span>${esc(dayLabel(x.data))}${x.dove === 'fuori' ? ` · ${esc(x.locale || 'fuori')}` : ', a casa'}</span><b>${x.voto ?? ''}</b></li>`).join('')}</ul></div>`,
+    `<button type="button" class="wide" id="btn-drink-wine">Apri la scheda del vino</button>`,
+  ].filter(Boolean).join('');
+  box.innerHTML = `<span class="section-title">Scheda del vino</span>${blocks}`;
+  box.hidden = false;
 }
 
 function syncDrinkForm() {
@@ -2328,6 +2359,18 @@ function bindDrinkSheet() {
     $('#dlg-drink').close();
     await undoDrink(drink);
     toast(drink.fromCellar ? 'Bevuta annullata: la bottiglia è tornata in cantina.' : 'Bevuta eliminata.');
+  });
+  $('#drink-wine').addEventListener('click', (e) => {
+    if (!e.target.closest('#btn-drink-wine')) return;
+    const id = drinkEdit.drink?.wineId;
+    $('#dlg-drink').close('save');
+    if (id) openWine(id);
+  });
+  $('#drink-photos').addEventListener('click', (e) => {
+    const img = e.target.closest('img');
+    if (!img) return;
+    const imgs = [...$('#drink-photos').querySelectorAll('img')];
+    openViewer(imgs.map((i) => i.src), imgs.indexOf(img));
   });
   $('#dlg-drink').addEventListener('close', async () => {
     const drink = drinkEdit.drink;
@@ -2424,17 +2467,16 @@ function renderLog(w, note = '') {
 const kvRows = (rows) => rows.filter((r) => r[1]).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
 const joinList = (v) => (Array.isArray(v) ? v.join(', ') : v) || '';
 
-function renderWineHead(w) {
+// Blocchi in sola lettura della scheda di un vino: li usa la scheda in cantina e anche la bevuta aperta dal diario.
+function wineInfo(w) {
   const d = w.data || {};
   const main = d.nome || d.denominazione || d.produttore;
-  $('#wine-name').textContent = listTitle(w);
-  $('#wine-sub').textContent = [d.produttore !== main && d.produttore, d.denominazione !== main && d.denominazione].filter(Boolean).join(' · ');
+  const sub = [d.produttore !== main && d.produttore, d.denominazione !== main && d.denominazione].filter(Boolean).join(' · ');
 
-  $('#qty-out').textContent = Number(w.quantita) || 0;
   const price = paidOrEstimate(w);
   const paid = Number(w.prezzo_pagato) > 0;
   const bought = [w.acquisto_luogo, w.acquisto_data && new Date(w.acquisto_data + 'T12:00:00').toLocaleDateString('it-IT', { month: 'short', year: 'numeric' })].filter(Boolean).join(', ');
-  $('#wine-kv').innerHTML = kvRows([
+  const kv = kvRows([
     ['Comprato', bought],
     [paid ? 'Pagato' : 'Prezzo stimato', price && `${formatPrice(price)} a bottiglia${Number(w.quantita) > 1 ? ` · valore ${formatPrice(price * w.quantita)}` : ''}`],
     ['Prezzo sul web', paid && Number(d.prezzo) > 0 && `~${formatPrice(d.prezzo)}`],
@@ -2445,6 +2487,7 @@ function renderWineHead(w) {
   const state = drinkState(d);
   const from = Number(d.bere_dal) || null;
   const to = Number(d.bere_entro) || null;
+  let window = '';
   if (state) {
     const year = new Date().getFullYear() + new Date().getMonth() / 12;
     const lo = Math.floor(Math.min(from || to - 4, year) - 1);
@@ -2453,15 +2496,14 @@ function renderWineHead(w) {
     const a = from || lo;
     const b = to || hi;
     const ticks = [lo, Math.round((lo * 2 + hi) / 3), Math.round((lo + hi * 2) / 3), hi];
-    $('#wine-window').innerHTML = `
+    window = `
       <div class="box-row"><span class="label">Quando berlo</span><span class="pill ${state.k}">${esc(state.text)}</span></div>
       <div class="track"><span class="fill ${state.k}" style="left:${pos(a)};width:calc(${pos(b)} - ${pos(a)})"></span><span class="now" style="left:${pos(year)}"></span></div>
       <div class="ticks">${ticks.map((t) => `<span>${t}</span>`).join('')}</div>
       ${d.finestra_consumo ? `<p class="text">${esc(d.finestra_consumo)}</p>` : ''}`;
   }
-  $('#wine-window').hidden = !state;
 
-  const about = kvRows([
+  const aboutRows = kvRows([
     ['Produttore', d.produttore],
     ['Denominazione', [d.denominazione, d.classificazione && !String(d.denominazione || '').includes(d.classificazione) && d.classificazione].filter(Boolean).join(' ')],
     ['Annata', d.annata],
@@ -2472,23 +2514,33 @@ function renderWineHead(w) {
     ['Formato', d.formato_ml && (Number(d.formato_ml) === 750 ? '75 cl' : `${Number(d.formato_ml) / 10} cl`)],
     ['Caratteristiche', joinList(d.caratteristiche)],
   ]);
-  $('#wine-about').innerHTML = about ? `<span class="label">Il vino</span><dl class="kv">${about}</dl>${d.affinamento ? `<p class="text"><b>Affinamento.</b> ${esc(d.affinamento)}</p>` : ''}` : '';
-  $('#wine-about').hidden = !about;
+  const about = aboutRows ? `<span class="label">Il vino</span><dl class="kv">${aboutRows}</dl>${d.affinamento ? `<p class="text"><b>Affinamento.</b> ${esc(d.affinamento)}</p>` : ''}` : '';
 
-  const table = [
+  const tableParts = [
     d.temperatura_servizio && `<dl class="kv">${kvRows([['Servire a', d.temperatura_servizio]])}</dl>`,
     d.abbinamenti && `<p class="text"><b>Abbinamenti.</b> ${esc(joinList(d.abbinamenti))}</p>`,
     d.descrizione && `<p class="text">${esc(d.descrizione)}</p>`,
   ].filter(Boolean).join('');
-  $('#wine-table').innerHTML = table ? `<span class="label">In tavola</span>${table}` : '';
-  $('#wine-table').hidden = !table;
+  const table = tableParts ? `<span class="label">In tavola</span>${tableParts}` : '';
 
-  const awards = Array.isArray(d.riconoscimenti) ? d.riconoscimenti.filter(Boolean) : d.riconoscimenti ? [d.riconoscimenti] : [];
+  const awardList = Array.isArray(d.riconoscimenti) ? d.riconoscimenti.filter(Boolean) : d.riconoscimenti ? [d.riconoscimenti] : [];
   const unsure = (w.uncertain || []).includes('riconoscimenti');
-  $('#wine-awards').innerHTML = awards.length
-    ? `<span class="label">Guide e premi</span><ul class="awards">${awards.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>${unsure ? '<p class="hint">Trovati sul web ma senza una fonte sicura: da verificare.</p>' : ''}`
+  const awards = awardList.length
+    ? `<span class="label">Guide e premi</span><ul class="awards">${awardList.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>${unsure ? '<p class="hint">Trovati sul web ma senza una fonte sicura: da verificare.</p>' : ''}`
     : '';
-  $('#wine-awards').hidden = !awards.length;
+  return { title: listTitle(w), sub, kv, window, about, table, awards };
+}
+
+function renderWineHead(w) {
+  const info = wineInfo(w);
+  $('#wine-name').textContent = info.title;
+  $('#wine-sub').textContent = info.sub;
+  $('#qty-out').textContent = Number(w.quantita) || 0;
+  $('#wine-kv').innerHTML = info.kv;
+  for (const k of ['window', 'about', 'table', 'awards']) {
+    $(`#wine-${k}`).innerHTML = info[k];
+    $(`#wine-${k}`).hidden = !info[k];
+  }
 }
 
 // Modulo di modifica diviso per argomento; i campi corti stanno due per riga.

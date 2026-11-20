@@ -157,9 +157,10 @@
 
   <dialog id="dlg-drink" class="sheet">
     <form method="dialog" id="drink-form">
-      <div class="lead">
-        <span class="thumb" id="drink-thumb"></span>
-        <div><h2 id="drink-title">Bevuta</h2><small id="drink-sub" class="hint"></small></div>
+      <div class="hero" id="drink-photos" hidden></div>
+      <div class="wine-head">
+        <h2 class="wname" id="drink-title">Bevuta</h2>
+        <small id="drink-sub" class="wsub"></small>
       </div>
       <label id="drink-name">Vino
         <input name="nome" placeholder="Produttore, nome, annata" autocomplete="off">
@@ -187,6 +188,7 @@
         <button value="cancel" formnovalidate>Chiudi</button>
         <button value="save" class="primary">Salva nel diario</button>
       </div>
+      <div id="drink-wine" hidden></div>
     </form>
   </dialog>
 
